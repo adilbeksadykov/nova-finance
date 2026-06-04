@@ -327,6 +327,17 @@ export default function TransactionsView({
   const [formIsRecurring, setFormIsRecurring] = useState(false);
   const [formRecurringFreq, setFormRecurringFreq] = useState<'weekly' | 'monthly' | 'yearly'>('monthly');
   const [formAttachment, setFormAttachment] = useState<File | null>(null);
+
+  // Transfer form states
+  const [formToAccountId, setFormToAccountId] = useState('1');
+  const [formToAmount, setFormToAmount] = useState('');
+  const [formToDate, setFormToDate] = useState('2026-05-30');
+
+  // Accrual form states
+  const [formLegalEntity, setFormLegalEntity] = useState('NOVA');
+  const [formDebitArticle, setFormDebitArticle] = useState('Зарплата');
+  const [formCreditArticle, setFormCreditArticle] = useState('Зарплата');
+  const [formAccrualCashMethod, setFormAccrualCashMethod] = useState(true);
   
   const [formHasSplits, setFormHasSplits] = useState(false);
   const [formSplits, setFormSplits] = useState<TransactionSplit[]>([]);
@@ -443,6 +454,18 @@ export default function TransactionsView({
     setFormAttachment(null);
     setFormHasSplits(false);
     setFormSplits([]);
+    
+    // Transfer init
+    setFormToAccountId(subAccounts[1]?.id || subAccounts[0]?.id || '1');
+    setFormToAmount('');
+    setFormToDate('2026-05-30');
+
+    // Accrual init
+    setFormLegalEntity(legalEntities[0]?.code || 'NOVA');
+    setFormDebitArticle(categories[0]?.name || 'Зарплата');
+    setFormCreditArticle(categories[0]?.name || 'Зарплата');
+    setFormAccrualCashMethod(true);
+
     setIsCreateOpen(true);
   };
 
@@ -462,6 +485,17 @@ export default function TransactionsView({
     setFormAttachment(null);
     setFormHasSplits(!!tx.splits && tx.splits.length > 0);
     setFormSplits(tx.splits || []);
+
+    // Transfer fields load
+    setFormToAccountId(tx.toAccountId || subAccounts[1]?.id || subAccounts[0]?.id || '1');
+    setFormToAmount(tx.toAmount?.toString() || tx.amount.toString());
+    setFormToDate(tx.toDate || tx.date);
+
+    // Accrual fields load
+    setFormLegalEntity(tx.legalEntity || legalEntities[0]?.code || 'NOVA');
+    setFormDebitArticle(tx.debitArticle || tx.article);
+    setFormCreditArticle(tx.creditArticle || tx.article);
+    setFormAccrualCashMethod(tx.accrualCashMethod !== undefined ? tx.accrualCashMethod : true);
   };
 
   const getImpact = (type: 'income' | 'expense' | 'transfer' | 'accrual', amount: number, isConfirmed: boolean) => {
@@ -469,6 +503,27 @@ export default function TransactionsView({
     if (type === 'income') return amount;
     if (type === 'expense' || type === 'transfer') return -amount;
     return 0;
+  };
+
+  const recalculateBalances = (txs: Transaction[], accs: SubAccount[]): SubAccount[] => {
+    return accs.map(acc => {
+      let balance = acc.initialBalance;
+      txs.forEach(tx => {
+        if (!tx.isConfirmed) return;
+        if (tx.accountId === acc.id) {
+          if (tx.type === 'income') {
+            balance += tx.amount;
+          } else if (tx.type === 'expense' || tx.type === 'transfer') {
+            balance -= tx.amount;
+          }
+        }
+        if (tx.type === 'transfer' && tx.toAccountId === acc.id) {
+          const toAmt = tx.toAmount !== undefined ? tx.toAmount : tx.amount;
+          balance += toAmt;
+        }
+      });
+      return { ...acc, balance };
+    });
   };
 
   const handleSaveTransaction = (e: React.FormEvent) => {
@@ -479,23 +534,8 @@ export default function TransactionsView({
     const accountName = acc ? acc.name : 'Наличные';
 
     if (editingTx) {
-      // Revert old impact and apply new impact
-      const oldImpact = getImpact(editingTx.type, editingTx.amount, editingTx.isConfirmed);
-      const newImpact = getImpact(formType, Number(formAmount), formIsConfirmed);
-
-      setSubAccounts(prev => prev.map(a => {
-        let newBalance = a.balance;
-        if (a.id === editingTx.accountId) {
-          newBalance -= oldImpact;
-        }
-        if (a.id === formAccountId) {
-          newBalance += newImpact;
-        }
-        return { ...a, balance: newBalance };
-      }));
-
       // Editing
-      setTransactions(prev => prev.map(t => 
+      const updatedTxs = transactions.map(t => 
         t.id === editingTx.id 
           ? {
               ...t,
@@ -504,7 +544,7 @@ export default function TransactionsView({
               accountId: formAccountId,
               accountName,
               amount: Number(formAmount),
-              contragent: formContragent,
+              contragent: formType === 'accrual' ? 'Начисление' : (formContragent || 'Не указан'),
               notes: formNotes,
               isConfirmed: formIsConfirmed,
               isRecurring: formIsRecurring,
@@ -512,23 +552,27 @@ export default function TransactionsView({
               attachmentName: formAttachment?.name || t.attachmentName,
               attachmentSize: formAttachment ? `${(formAttachment.size / 1024 / 1024).toFixed(2)} MB` : t.attachmentSize,
               splits: formHasSplits ? formSplits : undefined,
-              article: formHasSplits ? '(Сплит-операция)' : formArticle,
+              article: formType === 'transfer' ? 'Перемещение' : formType === 'accrual' ? formDebitArticle : (formHasSplits ? '(Сплит-операция)' : formArticle),
               project: formHasSplits ? '(Несколькo)' : formProject,
+              
+              // transfer fields
+              toAccountId: formType === 'transfer' ? formToAccountId : undefined,
+              toAccountName: formType === 'transfer' ? (subAccounts.find(s => s.id === formToAccountId)?.name || '') : undefined,
+              toAmount: formType === 'transfer' ? (Number(formToAmount) || Number(formAmount)) : undefined,
+              toDate: formType === 'transfer' ? formToDate : undefined,
+
+              // accrual fields
+              legalEntity: formType === 'accrual' ? formLegalEntity : undefined,
+              debitArticle: formType === 'accrual' ? formDebitArticle : undefined,
+              creditArticle: formType === 'accrual' ? formCreditArticle : undefined,
+              accrualCashMethod: formType === 'accrual' ? formAccrualCashMethod : undefined,
             }
           : t
-      ));
+      );
+      setTransactions(updatedTxs);
+      setSubAccounts(prev => recalculateBalances(updatedTxs, prev));
       setEditingTx(null);
     } else {
-      // Create impact
-      const impact = getImpact(formType, Number(formAmount), formIsConfirmed);
-      if (impact !== 0) {
-        setSubAccounts(prev => prev.map(a => 
-          a.id === formAccountId 
-            ? { ...a, balance: a.balance + impact }
-            : a
-        ));
-      }
-
       // Creating
       const newTx: Transaction = {
         id: `tx-${Date.now()}`,
@@ -537,8 +581,8 @@ export default function TransactionsView({
         accountId: formAccountId,
         accountName,
         amount: Number(formAmount),
-        contragent: formContragent || 'Не указан',
-        article: formHasSplits ? '(Сплит-операция)' : formArticle,
+        contragent: formType === 'accrual' ? 'Начисление' : (formContragent || 'Не указан'),
+        article: formType === 'transfer' ? 'Перемещение' : formType === 'accrual' ? formDebitArticle : (formHasSplits ? '(Сплит-операция)' : formArticle),
         project: formHasSplits ? '(Несколько)' : formProject,
         isConfirmed: formIsConfirmed,
         notes: formNotes,
@@ -547,44 +591,37 @@ export default function TransactionsView({
         attachmentName: formAttachment?.name,
         attachmentSize: formAttachment ? `${(formAttachment.size / 1024 / 1024).toFixed(2)} MB` : undefined,
         splits: formHasSplits ? formSplits : undefined,
+
+        // transfer fields
+        toAccountId: formType === 'transfer' ? formToAccountId : undefined,
+        toAccountName: formType === 'transfer' ? (subAccounts.find(s => s.id === formToAccountId)?.name || '') : undefined,
+        toAmount: formType === 'transfer' ? (Number(formToAmount) || Number(formAmount)) : undefined,
+        toDate: formType === 'transfer' ? formToDate : undefined,
+
+        // accrual fields
+        legalEntity: formType === 'accrual' ? formLegalEntity : undefined,
+        debitArticle: formType === 'accrual' ? formDebitArticle : undefined,
+        creditArticle: formType === 'accrual' ? formCreditArticle : undefined,
+        accrualCashMethod: formType === 'accrual' ? formAccrualCashMethod : undefined,
       };
-      setTransactions(prev => [newTx, ...prev]);
+      const updatedTxs = [newTx, ...transactions];
+      setTransactions(updatedTxs);
+      setSubAccounts(prev => recalculateBalances(updatedTxs, prev));
       setIsCreateOpen(false);
     }
   };
 
   const handleDeleteTx = (id: string) => {
-    const tx = transactions.find(t => t.id === id);
-    if (!tx) return;
-
-    // Direct deletion since window.confirm is blocked in iframes
-    const impact = getImpact(tx.type, tx.amount, tx.isConfirmed);
-    if (impact !== 0) {
-      setSubAccounts(prev => prev.map(a => 
-        a.id === tx.accountId 
-          ? { ...a, balance: a.balance - impact }
-          : a
-      ));
-    }
-
-    setTransactions(prev => prev.filter(t => t.id !== id));
+    const updatedTxs = transactions.filter(t => t.id !== id);
+    setTransactions(updatedTxs);
+    setSubAccounts(prev => recalculateBalances(updatedTxs, prev));
     if (editingTx?.id === id) setEditingTx(null);
   };
 
   const handleDeleteSelected = () => {
-    const txsToDelete = transactions.filter(t => selectedTxs.includes(t.id));
-    
-    setSubAccounts(prev => prev.map(a => {
-      let balanceChange = 0;
-      txsToDelete.forEach(tx => {
-        if (tx.accountId === a.id) {
-          balanceChange -= getImpact(tx.type, tx.amount, tx.isConfirmed);
-        }
-      });
-      return balanceChange !== 0 ? { ...a, balance: a.balance + balanceChange } : a;
-    }));
-
-    setTransactions(prev => prev.filter(t => !selectedTxs.includes(t.id)));
+    const updatedTxs = transactions.filter(t => !selectedTxs.includes(t.id));
+    setTransactions(updatedTxs);
+    setSubAccounts(prev => recalculateBalances(updatedTxs, prev));
     if (editingTx && selectedTxs.includes(editingTx.id)) setEditingTx(null);
     setSelectedTxs([]);
   };
@@ -595,7 +632,7 @@ export default function TransactionsView({
     
     const headers = ['Дата', 'Счет', 'Тип', 'Сумма', 'Контрагент', 'Статья', 'Проект', 'Примечание'];
     const rows = txsToExport.map(tx => {
-      const typeStr = tx.type === 'income' ? 'Приход' : tx.type === 'expense' ? 'Расход' : tx.type === 'transfer' ? 'Перевод' : 'Начисление';
+      const typeStr = tx.type === 'income' ? 'Поступление' : tx.type === 'expense' ? 'Выплата' : tx.type === 'transfer' ? 'Перемещение' : 'Начисление';
       return [
         tx.date,
         tx.accountName,
@@ -1505,9 +1542,9 @@ export default function TransactionsView({
                           tx.type === 'expense' ? 'bg-zinc-50 border-zinc-250 text-zinc-800' :
                           tx.type === 'transfer' ? 'bg-zinc-50 border-zinc-250 text-zinc-800' : 'bg-zinc-50 border-zinc-250 text-zinc-800'
                         }`}>
-                          {tx.type === 'income' ? 'Приход' :
-                           tx.type === 'expense' ? 'Расход' :
-                           tx.type === 'transfer' ? 'Перевод' : 'Начисл.'}
+                          {tx.type === 'income' ? 'Поступление' :
+                           tx.type === 'expense' ? 'Выплата' :
+                           tx.type === 'transfer' ? 'Перемещение' : 'Начисление'}
                         </span>
                       </td>
                       <td className="p-3.5 font-medium text-zinc-900 max-w-[140px] truncate">{tx.contragent}</td>
@@ -1644,18 +1681,19 @@ export default function TransactionsView({
                   {[
                     { id: 'income', label: 'Поступление', color: 'bg-zinc-900 text-white' },
                     { id: 'expense', label: 'Выплата', color: 'bg-zinc-900 text-white' },
-                    { id: 'transfer', label: 'Перевод', color: 'bg-zinc-900 text-white' },
-                    { id: 'accrual', label: 'Начисление', color: 'bg-zinc-900 text-white' },
+                    { id: 'transfer', label: 'Перемещение', color: 'bg-zinc-900 text-white', tooltip: 'Внутренний платеж между моими счетами' },
+                    { id: 'accrual', label: 'Начисление', color: 'bg-zinc-900 text-white', tooltip: 'Перенос денег между учетными статьями. Например, чтобы списывать складские запасы или оборудование в расходы' },
                   ].map((t) => (
                     <button
                       key={t.id}
                       type="button"
+                      title={t.tooltip}
                       onClick={() => {
                         setFormType(t.id as any);
                         setFormArticle(t.id === 'income' ? 'Обучение за рубежом' : 'Зарплата');
                       }}
-                      className={`py-2 rounded-none text-[10px] font-bold text-center transition-all uppercase tracking-wider ${
-                        formType === t.id ? t.color : 'text-zinc-400 hover:text-zinc-650'
+                      className={`py-2 text-[10px] font-bold uppercase tracking-wider transition-all rounded-none cursor-pointer ${
+                        formType === t.id ? 'bg-zinc-900 text-white shadow-xs' : 'text-zinc-500 hover:text-zinc-800'
                       }`}
                     >
                       {t.label}
@@ -1664,223 +1702,467 @@ export default function TransactionsView({
                 </div>
               </div>
 
-              {/* Date & Confirmation Toggle */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Дата операции</label>
-                  <input
-                    type="date"
-                    value={formDate}
-                    onChange={(e) => setFormDate(e.target.value)}
-                    required
-                    className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-zinc-50 font-mono focus:bg-white focus:border-zinc-800 outline-none"
-                  />
-                </div>
-                <div className="space-y-1.5 flex flex-col justify-end">
-                  <label className="flex items-center gap-2 border border-zinc-200 p-2 text-xs font-bold text-zinc-700 bg-zinc-50 rounded-none cursor-pointer hover:bg-zinc-100 select-none">
-                    <input
-                      type="checkbox"
-                      checked={formIsConfirmed}
-                      onChange={(e) => setFormIsConfirmed(e.target.checked)}
-                      className="rounded-none border-zinc-300 text-zinc-900 focus:ring-zinc-800 w-4 h-4 shadow-none"
-                    />
-                    <span className="font-sans">Подтвердить ведомость</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Sub-account selection & Amount */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Счет и юрлицо</label>
-                  <select
-                    value={formAccountId}
-                    onChange={(e) => {
-                      if (e.target.value === 'CREATE_NEW') setCreateAccountModal(true);
-                      else setFormAccountId(e.target.value);
-                    }}
-                    className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
-                  >
-                    {subAccounts.map((sub) => (
-                      <option key={sub.id} value={sub.id}>
-                        {sub.name} [{sub.parentEntity}] ({sub.balance >= 0 ? '+' : ''}{formatCurrency(sub.balance, '')})
-                      </option>
-                    ))}
-                    <option value="CREATE_NEW">+++ Создать счет +++</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Сумма в KZT (₸)</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="0"
-                      value={formAmount}
-                      onChange={(e) => setFormAmount(e.target.value.replace(/\D/g, ''))}
-                      required
-                      className="w-full text-xs border border-zinc-200 rounded-none p-2.5 pl-3 pr-10 text-zinc-800 bg-zinc-50 font-mono font-bold focus:outline-none focus:bg-white focus:border-zinc-800"
-                    />
-                    <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">₸</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Contragent Selection */}
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Контрагент / Клиент</label>
-                <input
-                  type="text"
-                  placeholder="ФИО сотрудника, наименование компании ФОП или инвестора"
-                  value={formContragent}
-                  onChange={(e) => setFormContragent(e.target.value)}
-                  className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-zinc-50 focus:outline-none focus:bg-white focus:border-zinc-800"
-                />
-              </div>
-
-              {/* Categorical Article & Project */}
-              {/* Categorical Article & Project */}
-              <div className="flex items-center gap-3 bg-zinc-50 border border-zinc-200 p-3">
-                <input 
-                  type="checkbox" 
-                  checked={formHasSplits} 
-                  onChange={(e) => {
-                    setFormHasSplits(e.target.checked);
-                    if (e.target.checked && formSplits.length === 0) {
-                      setFormSplits([{ id: `split-${Date.now()}`, amount: Number(formAmount) || 0, article: formArticle, project: formProject, notes: '' }]);
-                    }
-                  }}
-                  id="create-splits"
-                  className="w-4 h-4 cursor-pointer accent-zinc-900"
-                />
-                <label htmlFor="create-splits" className="text-xs text-zinc-700 font-bold select-none cursor-pointer flex-1">Сплитование операции (разбить на части)</label>
-              </div>
-
-              {!formHasSplits ? (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Учетная статья</label>
-                    <select
-                      value={formArticle}
-                      onChange={(e) => {
-                        if (e.target.value === 'CREATE_NEW') setCreateArticleModal(true);
-                        else setFormArticle(e.target.value);
-                      }}
-                      className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
-                    >
-                      {allArticles.map((art, idx) => (
-                        <option key={idx} value={art}>{art}</option>
-                      ))}
-                      <option value="CREATE_NEW">+++ Создать статью +++</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Корпоративный проект</label>
-                    <select
-                      value={formProject}
-                      onChange={(e) => {
-                        if (e.target.value === 'CREATE_NEW') setCreateProjectModal(true);
-                        else setFormProject(e.target.value);
-                      }}
-                      className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
-                    >
-                      {activeProjects.map((proj, idx) => (
-                        <option key={idx} value={proj}>{proj}</option>
-                      ))}
-                      <option value="CREATE_NEW">+++ Создать проект +++</option>
-                    </select>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3 bg-zinc-50 border border-zinc-200 p-4">
-                  <div className="flex justify-between items-center">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Части операции</label>
-                    <div className="text-[10px] font-mono text-zinc-500">
-                      Всего разбито: {formSplits.reduce((acc, s) => acc + Number(s.amount || 0), 0).toLocaleString('ru-RU')} / 
-                      {Number(formAmount || 0).toLocaleString('ru-RU')}
+              {(formType === 'income' || formType === 'expense') && (
+                <>
+                  {/* Date & Confirmation Toggle */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Дата операции</label>
+                      <input
+                        type="date"
+                        value={formDate}
+                        onChange={(e) => setFormDate(e.target.value)}
+                        required
+                        className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-zinc-50 font-mono focus:bg-white focus:border-zinc-800 outline-none"
+                      />
+                    </div>
+                    <div className="space-y-1.5 flex flex-col justify-end">
+                      <label className="flex items-center gap-2 border border-zinc-200 p-2 text-xs font-bold text-zinc-700 bg-zinc-50 rounded-none cursor-pointer hover:bg-zinc-100 select-none">
+                        <input
+                          type="checkbox"
+                          checked={formIsConfirmed}
+                          onChange={(e) => setFormIsConfirmed(e.target.checked)}
+                          className="rounded-none border-zinc-300 text-zinc-900 focus:ring-zinc-800 w-4 h-4 shadow-none"
+                        />
+                        <span className="font-sans">Подтвердить ведомость</span>
+                      </label>
                     </div>
                   </div>
-                  {formSplits.map((split, idx) => (
-                    <div key={split.id} className="grid grid-cols-12 gap-2 relative group p-3 bg-white border border-zinc-200 shadow-sm">
-                      <div className="col-span-3">
-                        <label className="text-[9px] font-bold text-zinc-400 uppercase block mb-1">Сумма</label>
-                        <input
-                          type="number"
-                          value={split.amount}
-                          onChange={e => {
-                            const newSplits = [...formSplits];
-                            newSplits[idx].amount = Number(e.target.value);
-                            setFormSplits(newSplits);
-                          }}
-                          className="w-full text-xs border border-zinc-200 p-1.5 outline-none font-mono focus:border-zinc-800"
-                        />
-                      </div>
-                      <div className="col-span-4">
-                        <label className="text-[9px] font-bold text-zinc-400 uppercase block mb-1">Статья</label>
-                        <select
-                          value={split.article}
-                          onChange={e => {
-                            const newSplits = [...formSplits];
-                            newSplits[idx].article = e.target.value;
-                            setFormSplits(newSplits);
-                          }}
-                          className="w-full text-[10px] border border-zinc-200 p-1.5 outline-none focus:border-zinc-800"
-                        >
-                          {allArticles.map(a => <option key={a} value={a}>{a}</option>)}
-                        </select>
-                      </div>
-                      <div className="col-span-4">
-                        <label className="text-[9px] font-bold text-zinc-400 uppercase block mb-1">Проект</label>
-                        <select
-                          value={split.project}
-                          onChange={e => {
-                            const newSplits = [...formSplits];
-                            newSplits[idx].project = e.target.value;
-                            setFormSplits(newSplits);
-                          }}
-                          className="w-full text-[10px] border border-zinc-200 p-1.5 outline-none focus:border-zinc-800"
-                        >
-                          {activeProjects.map(p => <option key={p} value={p}>{p}</option>)}
-                        </select>
-                      </div>
-                      <div className="col-span-1 flex items-end justify-end pb-1 pb-1">
-                        <button 
-                          type="button" 
-                          onClick={() => {
-                            setFormSplits(formSplits.filter(s => s.id !== split.id));
-                          }}
-                          className="text-red-600 hover:text-red-800 font-bold text-xs"
-                        >
-                          &times;
-                        </button>
-                      </div>
-                      <div className="col-span-12 mt-1">
+
+                  {/* Sub-account selection & Amount */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Счет и юрлицо</label>
+                      <select
+                        value={formAccountId}
+                        onChange={(e) => {
+                          if (e.target.value === 'CREATE_NEW') setCreateAccountModal(true);
+                          else setFormAccountId(e.target.value);
+                        }}
+                        className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
+                      >
+                        {subAccounts.map((sub) => (
+                          <option key={sub.id} value={sub.id}>
+                            {sub.name} [{sub.parentEntity}] ({sub.balance >= 0 ? '+' : ''}{formatCurrency(sub.balance, '')})
+                          </option>
+                        ))}
+                        <option value="CREATE_NEW">+++ Создать счет +++</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Сумма в KZT (₸)</label>
+                      <div className="relative">
                         <input
                           type="text"
-                          placeholder="Примечание к части (опционально)"
-                          value={split.notes}
-                          onChange={e => {
-                            const newSplits = [...formSplits];
-                            newSplits[idx].notes = e.target.value;
-                            setFormSplits(newSplits);
-                          }}
-                          className="w-full text-[10px] border border-zinc-200 p-1.5 focus:border-zinc-800 outline-none"
+                          placeholder="0"
+                          value={formAmount}
+                          onChange={(e) => setFormAmount(e.target.value.replace(/\D/g, ''))}
+                          required
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 pl-3 pr-10 text-zinc-800 bg-zinc-50 font-mono font-bold focus:outline-none focus:bg-white focus:border-zinc-800"
                         />
+                        <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">₸</span>
                       </div>
                     </div>
-                  ))}
-                  <button 
-                    type="button" 
-                    onClick={() => {
-                      const currentSum = formSplits.reduce((acc, s) => acc + Number(s.amount || 0), 0);
-                      const remainder = Math.max(0, Number(formAmount || 0) - currentSum);
-                      setFormSplits([...formSplits, { id: `split-${Date.now()}`, amount: remainder, article: allArticles[0], project: activeProjects[0], notes: '' }]);
-                    }}
-                    className="w-full py-2 border border-zinc-300 text-xs text-zinc-600 font-bold uppercase tracking-wider hover:bg-zinc-100 transition-colors bg-white mt-2 cursor-pointer"
-                  >
-                    + Добавить часть операции
-                  </button>
+                  </div>
+
+                  {/* Contragent Selection */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Контрагент / Клиент</label>
+                    <input
+                      type="text"
+                      placeholder="ФИО сотрудника, наименование компании ФОП или инвестора"
+                      value={formContragent}
+                      onChange={(e) => setFormContragent(e.target.value)}
+                      className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-zinc-50 focus:outline-none focus:bg-white focus:border-zinc-800"
+                    />
+                  </div>
+
+                  {/* splits & normal categories/projects selection */}
+                  <div className="flex items-center gap-3 bg-zinc-50 border border-zinc-200 p-3">
+                    <input 
+                      type="checkbox" 
+                      checked={formHasSplits} 
+                      onChange={(e) => {
+                        setFormHasSplits(e.target.checked);
+                        if (e.target.checked && formSplits.length === 0) {
+                          setFormSplits([{ id: `split-${Date.now()}`, amount: Number(formAmount) || 0, article: formArticle, project: formProject, notes: '' }]);
+                        }
+                      }}
+                      id="create-splits"
+                      className="w-4 h-4 cursor-pointer accent-zinc-900"
+                    />
+                    <label htmlFor="create-splits" className="text-xs text-zinc-700 font-bold select-none cursor-pointer flex-1">Сплитование операции (разбить на части)</label>
+                  </div>
+
+                  {!formHasSplits ? (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Учетная статья</label>
+                        <select
+                          value={formArticle}
+                          onChange={(e) => {
+                            if (e.target.value === 'CREATE_NEW') setCreateArticleModal(true);
+                            else setFormArticle(e.target.value);
+                          }}
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
+                        >
+                          {allArticles.map((art, idx) => (
+                            <option key={idx} value={art}>{art}</option>
+                          ))}
+                          <option value="CREATE_NEW">+++ Создать статью +++</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Корпоративный проект</label>
+                        <select
+                          value={formProject}
+                          onChange={(e) => {
+                            if (e.target.value === 'CREATE_NEW') setCreateProjectModal(true);
+                            else setFormProject(e.target.value);
+                          }}
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
+                        >
+                          {activeProjects.map((proj, idx) => (
+                            <option key={idx} value={proj}>{proj}</option>
+                          ))}
+                          <option value="CREATE_NEW">+++ Создать проект +++</option>
+                        </select>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 bg-zinc-50 border border-zinc-200 p-4">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Части операции</label>
+                        <div className="text-[10px] font-mono text-zinc-500">
+                          Всего разбито: {formSplits.reduce((acc, s) => acc + Number(s.amount || 0), 0).toLocaleString('ru-RU')} / 
+                          {Number(formAmount || 0).toLocaleString('ru-RU')}
+                        </div>
+                      </div>
+                      {formSplits.map((split, idx) => (
+                        <div key={split.id} className="grid grid-cols-12 gap-2 relative group p-3 bg-white border border-zinc-200 shadow-sm">
+                          <div className="col-span-3">
+                            <label className="text-[9px] font-bold text-zinc-400 uppercase block mb-1">Сумма</label>
+                            <input
+                              type="number"
+                              value={split.amount}
+                              onChange={e => {
+                                const newSplits = [...formSplits];
+                                newSplits[idx].amount = Number(e.target.value);
+                                setFormSplits(newSplits);
+                              }}
+                              className="w-full text-xs border border-zinc-200 p-1.5 outline-none font-mono focus:border-zinc-800"
+                            />
+                          </div>
+                          <div className="col-span-4">
+                            <label className="text-[9px] font-bold text-zinc-400 uppercase block mb-1">Статья</label>
+                            <select
+                              value={split.article}
+                              onChange={e => {
+                                const newSplits = [...formSplits];
+                                newSplits[idx].article = e.target.value;
+                                setFormSplits(newSplits);
+                              }}
+                              className="w-full text-[10px] border border-zinc-200 p-1.5 outline-none focus:border-zinc-800"
+                            >
+                              {allArticles.map(a => <option key={a} value={a}>{a}</option>)}
+                            </select>
+                          </div>
+                          <div className="col-span-4">
+                            <label className="text-[9px] font-bold text-zinc-400 uppercase block mb-1">Проект</label>
+                            <select
+                              value={split.project}
+                              onChange={e => {
+                                const newSplits = [...formSplits];
+                                newSplits[idx].project = e.target.value;
+                                setFormSplits(newSplits);
+                              }}
+                              className="w-full text-[10px] border border-zinc-200 p-1.5 outline-none focus:border-zinc-800"
+                            >
+                              {activeProjects.map(p => <option key={p} value={p}>{p}</option>)}
+                            </select>
+                          </div>
+                          <div className="col-span-1 flex items-end justify-end pb-1 pb-1">
+                            <button 
+                              type="button" 
+                              onClick={() => {
+                                setFormSplits(formSplits.filter(s => s.id !== split.id));
+                              }}
+                              className="text-red-600 hover:text-red-800 font-bold text-xs"
+                            >
+                              &times;
+                            </button>
+                          </div>
+                          <div className="col-span-12 mt-1">
+                            <input
+                              type="text"
+                              placeholder="Примечание к части (опционально)"
+                              value={split.notes}
+                              onChange={e => {
+                                const newSplits = [...formSplits];
+                                newSplits[idx].notes = e.target.value;
+                                setFormSplits(newSplits);
+                              }}
+                              className="w-full text-[10px] border border-zinc-200 p-1.5 focus:border-zinc-800 outline-none"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          const currentSum = formSplits.reduce((acc, s) => acc + Number(s.amount || 0), 0);
+                          const remainder = Math.max(0, Number(formAmount || 0) - currentSum);
+                          setFormSplits([...formSplits, { id: `split-${Date.now()}`, amount: remainder, article: allArticles[0], project: activeProjects[0], notes: '' }]);
+                        }}
+                        className="w-full py-2 border border-zinc-300 text-xs text-zinc-650 font-bold uppercase tracking-wider hover:bg-zinc-100 transition-colors bg-white mt-2 cursor-pointer"
+                      >
+                        + Добавить часть операции
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {formType === 'transfer' && (
+                <div className="space-y-5 animate-fade-in">
+                  {/* ОТКУДА */}
+                  <div className="p-4 bg-zinc-50 border border-zinc-200 space-y-4">
+                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-200 pb-1.5">ОТКУДА</div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Дата списания</label>
+                        <input
+                          type="date"
+                          value={formDate}
+                          onChange={(e) => {
+                            setFormDate(e.target.value);
+                            setFormToDate(e.target.value); // Sync deposit date by default
+                          }}
+                          required
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-white font-mono focus:border-zinc-800 outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1.5 flex flex-col justify-end">
+                        <label className="flex items-center gap-2 border border-zinc-200 p-2.5 text-xs font-bold text-zinc-750 bg-white rounded-none cursor-pointer hover:bg-zinc-50 select-none">
+                          <input
+                            type="checkbox"
+                            checked={formIsConfirmed}
+                            onChange={(e) => setFormIsConfirmed(e.target.checked)}
+                            className="rounded-none border-zinc-300 text-zinc-900 focus:ring-zinc-800 w-4 h-4 shadow-none"
+                          />
+                          <span className="font-sans">Подтвердить оплату</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Счет списания</label>
+                        <select
+                          value={formAccountId}
+                          onChange={(e) => setFormAccountId(e.target.value)}
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                        >
+                          {subAccounts.map((sub) => (
+                            <option key={sub.id} value={sub.id}>
+                              {sub.name} [{sub.parentEntity}] ({formatCurrency(sub.balance, '')})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Сумма списания</label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="0"
+                            value={formAmount}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\D/g, '');
+                              setFormAmount(val);
+                              setFormToAmount(val); // Sync deposit amount by default
+                            }}
+                            required
+                            className="w-full text-xs border border-zinc-200 rounded-none p-2.5 pl-3 pr-10 text-zinc-800 bg-white font-mono font-bold focus:outline-none focus:border-zinc-800"
+                          />
+                          <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">₸</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Проект</label>
+                      <select
+                        value={formProject}
+                        onChange={(e) => setFormProject(e.target.value)}
+                        className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                      >
+                        {projects.map((proj) => (
+                          <option key={proj.id} value={proj.name}>{proj.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* КУДА */}
+                  <div className="p-4 bg-zinc-50 border border-zinc-200 space-y-4">
+                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-200 pb-1.5">КУДА</div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Дата зачисления</label>
+                        <input
+                          type="date"
+                          value={formToDate}
+                          onChange={(e) => setFormToDate(e.target.value)}
+                          required
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-white font-mono focus:border-zinc-800 outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1.5"></div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Счет зачисления</label>
+                        <select
+                          value={formToAccountId}
+                          onChange={(e) => setFormToAccountId(e.target.value)}
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                        >
+                          {subAccounts.map((sub) => (
+                            <option key={sub.id} value={sub.id}>
+                              {sub.name} [{sub.parentEntity}] ({formatCurrency(sub.balance, '')})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Сумма зачисления</label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="0"
+                            value={formToAmount}
+                            onChange={(e) => setFormToAmount(e.target.value.replace(/\D/g, ''))}
+                            required
+                            className="w-full text-xs border border-zinc-200 rounded-none p-2.5 pl-3 pr-10 text-zinc-800 bg-white font-mono font-bold focus:outline-none focus:border-zinc-800"
+                          />
+                          <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">₸</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {formType === 'accrual' && (
+                <div className="space-y-5 animate-fade-in">
+                  {/* ДЕБЕТ */}
+                  <div className="p-4 bg-zinc-50 border border-zinc-200 space-y-4">
+                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-200 pb-1.5">ДЕБЕТ</div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Дата начисления</label>
+                        <input
+                          type="date"
+                          value={formDate}
+                          onChange={(e) => setFormDate(e.target.value)}
+                          required
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-white font-mono focus:border-zinc-800 outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1.5 flex flex-col justify-end">
+                        <label className="flex items-center gap-2 border border-zinc-200 p-2.5 text-xs font-bold text-zinc-750 bg-white rounded-none cursor-pointer hover:bg-zinc-50 select-none">
+                          <input
+                            type="checkbox"
+                            checked={formIsConfirmed}
+                            onChange={(e) => setFormIsConfirmed(e.target.checked)}
+                            className="rounded-none border-zinc-300 text-zinc-900 focus:ring-zinc-800 w-4 h-4 shadow-none"
+                          />
+                          <span className="font-sans">Подтвердить начисление</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Юрлицо</label>
+                        <select
+                          value={formLegalEntity}
+                          onChange={(e) => setFormLegalEntity(e.target.value)}
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                        >
+                          {legalEntities.map((le) => (
+                            <option key={le.id} value={le.code}>{le.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Сумма</label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="0"
+                            value={formAmount}
+                            onChange={(e) => setFormAmount(e.target.value.replace(/\D/g, ''))}
+                            required
+                            className="w-full text-xs border border-zinc-200 rounded-none p-2.5 pl-3 pr-10 text-zinc-800 bg-white font-mono font-bold focus:outline-none focus:border-zinc-800"
+                          />
+                          <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">₸</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider font-semibold">Статья по дебету</label>
+                      <select
+                        value={formDebitArticle}
+                        onChange={(e) => setFormDebitArticle(e.target.value)}
+                        className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                      >
+                        {categories.map((cat) => (
+                          <option key={cat.id} value={cat.name}>{cat.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-2 border border-zinc-200 p-2.5 text-xs font-bold text-zinc-700 bg-white rounded-none cursor-pointer hover:bg-zinc-50 select-none">
+                      <input
+                        type="checkbox"
+                        checked={formAccrualCashMethod}
+                        onChange={(e) => setFormAccrualCashMethod(e.target.checked)}
+                        id="accrual-cash-method"
+                        className="w-4 h-4 cursor-pointer accent-zinc-900 rounded-none border-zinc-300"
+                      />
+                      <label htmlFor="accrual-cash-method" className="cursor-pointer font-sans select-none">Учитывать в ОПиУ кассовым методом</label>
+                    </div>
+                  </div>
+
+                  {/* КРЕДИТ */}
+                  <div className="p-4 bg-zinc-50 border border-zinc-200 space-y-4">
+                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-200 pb-1.5">КРЕДИТ</div>
+                    
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider font-semibold">Статья по кредиту</label>
+                      <select
+                        value={formCreditArticle}
+                        onChange={(e) => setFormCreditArticle(e.target.value)}
+                        className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                      >
+                        {categories.map((cat) => (
+                          <option key={cat.id} value={cat.name}>{cat.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -1992,12 +2274,13 @@ export default function TransactionsView({
                   {[
                     { id: 'income', label: 'Поступление', color: 'bg-zinc-900 text-white' },
                     { id: 'expense', label: 'Выплата', color: 'bg-zinc-900 text-white' },
-                    { id: 'transfer', label: 'Перевод', color: 'bg-zinc-900 text-white' },
-                    { id: 'accrual', label: 'Начисление', color: 'bg-zinc-900 text-white' },
+                    { id: 'transfer', label: 'Перемещение', color: 'bg-zinc-900 text-white', tooltip: 'Внутренний платеж между моими счетами' },
+                    { id: 'accrual', label: 'Начисление', color: 'bg-zinc-900 text-white', tooltip: 'Перенос денег между учетными статьями. Например, чтобы списывать складские запасы или оборудование в расходы' },
                   ].map((t) => (
                     <button
                       key={t.id}
                       type="button"
+                      title={t.tooltip}
                       onClick={() => setFormType(t.id as any)}
                       className={`py-2 rounded-none text-[10px] font-bold text-center transition-all uppercase tracking-wider ${
                         formType === t.id ? t.color : 'text-zinc-400 hover:text-zinc-650'
@@ -2009,214 +2292,459 @@ export default function TransactionsView({
                 </div>
               </div>
 
-              {/* Date & Confirm */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Дата платежа</label>
-                  <input
-                    type="date"
-                    value={formDate}
-                    onChange={(e) => setFormDate(e.target.value)}
-                    required
-                    className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-zinc-50 font-mono focus:bg-white focus:border-zinc-800 outline-none"
-                  />
-                </div>
-                <div className="space-y-1.5 flex flex-col justify-end">
-                  <label className="flex items-center gap-2 border border-zinc-200 p-2 text-xs font-bold text-zinc-750 bg-zinc-50 rounded-none cursor-pointer hover:bg-zinc-100 select-none">
+              {(formType === 'income' || formType === 'expense') && (
+                <>
+                  {/* Date & Confirm */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Дата платежа</label>
+                      <input
+                        type="date"
+                        value={formDate}
+                        onChange={(e) => setFormDate(e.target.value)}
+                        required
+                        className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-zinc-50 font-mono focus:bg-white focus:border-zinc-800 outline-none"
+                      />
+                    </div>
+                    <div className="space-y-1.5 flex flex-col justify-end">
+                      <label className="flex items-center gap-2 border border-zinc-200 p-2 text-xs font-bold text-zinc-750 bg-zinc-50 rounded-none cursor-pointer hover:bg-zinc-100 select-none">
+                        <input
+                          type="checkbox"
+                          checked={formIsConfirmed}
+                          onChange={(e) => setFormIsConfirmed(e.target.checked)}
+                          className="rounded-none border-zinc-300 text-zinc-900 focus:ring-zinc-800 w-4 h-4 shadow-none"
+                        />
+                        <span className="font-sans">Подтвердить ведомость</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Subaccounts & Amount */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Кошелек</label>
+                      <select
+                        value={formAccountId}
+                        onChange={(e) => {
+                          if (e.target.value === 'CREATE_NEW') setCreateAccountModal(true);
+                          else setFormAccountId(e.target.value);
+                        }}
+                        className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
+                      >
+                        {subAccounts.map((sub) => (
+                          <option key={sub.id} value={sub.id}>{sub.name} [{sub.parentEntity}]</option>
+                        ))}
+                        <option value="CREATE_NEW">+++ Создать счет +++</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Сумма валюты (₸)</label>
+                      <input
+                        type="text"
+                        value={formAmount}
+                        onChange={(e) => setFormAmount(e.target.value.replace(/\D/g, ''))}
+                        className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-zinc-50 font-mono font-bold focus:outline-none focus:bg-white focus:border-zinc-800"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Contragent Selection */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Контрагент (Составитель)</label>
                     <input
-                      type="checkbox"
-                      checked={formIsConfirmed}
-                      onChange={(e) => setFormIsConfirmed(e.target.checked)}
-                      className="rounded-none border-zinc-300 text-zinc-900 focus:ring-zinc-800 w-4 h-4 shadow-none"
+                      type="text"
+                      value={formContragent}
+                      onChange={(e) => setFormContragent(e.target.value)}
+                      className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-855 bg-zinc-50 focus:outline-none focus:bg-white focus:border-zinc-800"
                     />
-                    <span className="font-sans">Подтвердить ведомость</span>
-                  </label>
-                </div>
-              </div>
+                  </div>
 
-              {/* Subaccounts & Amount */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Кошелек</label>
-                  <select
-                    value={formAccountId}
-                    onChange={(e) => {
-                      if (e.target.value === 'CREATE_NEW') setCreateAccountModal(true);
-                      else setFormAccountId(e.target.value);
-                    }}
-                    className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
-                  >
-                    {subAccounts.map((sub) => (
-                      <option key={sub.id} value={sub.id}>{sub.name} [{sub.parentEntity}]</option>
-                    ))}
-                    <option value="CREATE_NEW">+++ Создать счет +++</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Сумма валюты (₸)</label>
-                  <input
-                    type="text"
-                    value={formAmount}
-                    onChange={(e) => setFormAmount(e.target.value.replace(/\D/g, ''))}
-                    className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-zinc-50 font-mono font-bold focus:outline-none focus:bg-white focus:border-zinc-800"
-                  />
-                </div>
-              </div>
-
-              {/* Contragent Selection */}
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Контрагент (Составитель)</label>
-                <input
-                  type="text"
-                  value={formContragent}
-                  onChange={(e) => setFormContragent(e.target.value)}
-                  className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 focus:outline-none focus:bg-white focus:border-zinc-800"
-                />
-              </div>
-
-              {/* Categories & Projects */}
-              <div className="flex items-center gap-3 bg-zinc-50 border border-zinc-200 p-3">
-                <input 
-                  type="checkbox" 
-                  checked={formHasSplits} 
-                  onChange={(e) => {
-                    setFormHasSplits(e.target.checked);
-                    if (e.target.checked && formSplits.length === 0) {
-                      setFormSplits([{ id: `split-${Date.now()}`, amount: Number(formAmount) || 0, article: formArticle, project: formProject, notes: '' }]);
-                    }
-                  }}
-                  id="edit-splits"
-                  className="w-4 h-4 cursor-pointer accent-zinc-900"
-                />
-                <label htmlFor="edit-splits" className="text-xs text-zinc-700 font-bold select-none cursor-pointer flex-1">Сплитование операции (разбить на части)</label>
-              </div>
-
-              {!formHasSplits ? (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Статья затрат/прибыли</label>
-                    <select
-                      value={formArticle}
+                  {/* Categories & Projects */}
+                  <div className="flex items-center gap-3 bg-zinc-50 border border-zinc-200 p-3">
+                    <input 
+                      type="checkbox" 
+                      checked={formHasSplits} 
                       onChange={(e) => {
-                        if (e.target.value === 'CREATE_NEW') setCreateArticleModal(true);
-                        else setFormArticle(e.target.value);
+                        setFormHasSplits(e.target.checked);
+                        if (e.target.checked && formSplits.length === 0) {
+                          setFormSplits([{ id: `split-${Date.now()}`, amount: Number(formAmount) || 0, article: formArticle, project: formProject, notes: '' }]);
+                        }
                       }}
-                      className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
-                    >
-                      {allArticles.map((art, idx) => (
-                        <option key={idx} value={art}>{art}</option>
-                      ))}
-                      <option value="CREATE_NEW">+++ Создать статью +++</option>
-                    </select>
+                      id="edit-splits"
+                      className="w-4 h-4 cursor-pointer accent-zinc-900"
+                    />
+                    <label htmlFor="edit-splits" className="text-xs text-zinc-700 font-bold select-none cursor-pointer flex-1">Сплитование операции (разбить на части)</label>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Корпоративный проект</label>
-                    <select
-                      value={formProject}
-                      onChange={(e) => {
-                        if (e.target.value === 'CREATE_NEW') setCreateProjectModal(true);
-                        else setFormProject(e.target.value);
-                      }}
-                      className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
-                    >
-                      {activeProjects.map((p, idx) => (
-                        <option key={idx} value={p}>{p}</option>
-                      ))}
-                      <option value="CREATE_NEW">+++ Создать проект +++</option>
-                    </select>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3 bg-zinc-50 border border-zinc-200 p-4">
-                  <div className="flex justify-between items-center">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Части операции</label>
-                    <div className="text-[10px] font-mono text-zinc-500">
-                      Всего разбито: {formSplits.reduce((acc, s) => acc + Number(s.amount || 0), 0).toLocaleString('ru-RU')} / 
-                      {Number(formAmount || 0).toLocaleString('ru-RU')}
-                    </div>
-                  </div>
-                  {formSplits.map((split, idx) => (
-                    <div key={split.id} className="grid grid-cols-12 gap-2 relative group p-3 bg-white border border-zinc-200 shadow-sm">
-                      <div className="col-span-3">
-                        <label className="text-[9px] font-bold text-zinc-400 uppercase block mb-1">Сумма</label>
-                        <input
-                          type="number"
-                          value={split.amount}
-                          onChange={e => {
-                            const newSplits = [...formSplits];
-                            newSplits[idx].amount = Number(e.target.value);
-                            setFormSplits(newSplits);
-                          }}
-                          className="w-full text-xs border border-zinc-200 p-1.5 outline-none font-mono focus:border-zinc-800"
-                        />
-                      </div>
-                      <div className="col-span-4">
-                        <label className="text-[9px] font-bold text-zinc-400 uppercase block mb-1">Статья</label>
+                  {!formHasSplits ? (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Статья затрат/прибыли</label>
                         <select
-                          value={split.article}
-                          onChange={e => {
-                            const newSplits = [...formSplits];
-                            newSplits[idx].article = e.target.value;
-                            setFormSplits(newSplits);
+                          value={formArticle}
+                          onChange={(e) => {
+                            if (e.target.value === 'CREATE_NEW') setCreateArticleModal(true);
+                            else setFormArticle(e.target.value);
                           }}
-                          className="w-full text-[10px] border border-zinc-200 p-1.5 outline-none focus:border-zinc-800"
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
                         >
-                          {allArticles.map(a => <option key={a} value={a}>{a}</option>)}
+                          {allArticles.map((art, idx) => (
+                            <option key={idx} value={art}>{art}</option>
+                          ))}
+                          <option value="CREATE_NEW">+++ Создать статью +++</option>
                         </select>
                       </div>
-                      <div className="col-span-4">
-                        <label className="text-[9px] font-bold text-zinc-400 uppercase block mb-1">Проект</label>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Корпоративный проект</label>
                         <select
-                          value={split.project}
-                          onChange={e => {
-                            const newSplits = [...formSplits];
-                            newSplits[idx].project = e.target.value;
-                            setFormSplits(newSplits);
+                          value={formProject}
+                          onChange={(e) => {
+                            if (e.target.value === 'CREATE_NEW') setCreateProjectModal(true);
+                            else setFormProject(e.target.value);
                           }}
-                          className="w-full text-[10px] border border-zinc-200 p-1.5 outline-none focus:border-zinc-800"
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
                         >
-                          {activeProjects.map(p => <option key={p} value={p}>{p}</option>)}
+                          {activeProjects.map((p, idx) => (
+                            <option key={idx} value={p}>{p}</option>
+                          ))}
+                          <option value="CREATE_NEW">+++ Создать проект +++</option>
                         </select>
                       </div>
-                      <div className="col-span-1 flex items-end justify-end pb-1 pb-1">
-                        <button 
-                          type="button" 
-                          onClick={() => {
-                            setFormSplits(formSplits.filter(s => s.id !== split.id));
-                          }}
-                          className="text-red-600 hover:text-red-800 font-bold text-xs"
-                        >
-                          &times;
-                        </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 bg-zinc-50 border border-zinc-200 p-4">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Части операции</label>
+                        <div className="text-[10px] font-mono text-zinc-500">
+                          Всего разбито: {formSplits.reduce((acc, s) => acc + Number(s.amount || 0), 0).toLocaleString('ru-RU')} / 
+                          {Number(formAmount || 0).toLocaleString('ru-RU')}
+                        </div>
                       </div>
-                      <div className="col-span-12 mt-1">
+                      {formSplits.map((split, idx) => (
+                        <div key={split.id} className="grid grid-cols-12 gap-2 relative group p-3 bg-white border border-zinc-200 shadow-sm">
+                          <div className="col-span-3">
+                            <label className="text-[9px] font-bold text-zinc-400 uppercase block mb-1">Сумма</label>
+                            <input
+                              type="number"
+                              value={split.amount}
+                              onChange={e => {
+                                const newSplits = [...formSplits];
+                                newSplits[idx].amount = Number(e.target.value);
+                                setFormSplits(newSplits);
+                              }}
+                              className="w-full text-xs border border-zinc-200 p-1.5 outline-none font-mono focus:border-zinc-800"
+                            />
+                          </div>
+                          <div className="col-span-4">
+                            <label className="text-[9px] font-bold text-zinc-400 uppercase block mb-1">Статья</label>
+                            <select
+                              value={split.article}
+                              onChange={e => {
+                                const newSplits = [...formSplits];
+                                newSplits[idx].article = e.target.value;
+                                setFormSplits(newSplits);
+                              }}
+                              className="w-full text-[10px] border border-zinc-200 p-1.5 outline-none focus:border-zinc-800"
+                            >
+                              {allArticles.map(a => <option key={a} value={a}>{a}</option>)}
+                            </select>
+                          </div>
+                          <div className="col-span-4">
+                            <label className="text-[9px] font-bold text-zinc-400 uppercase block mb-1">Проект</label>
+                            <select
+                              value={split.project}
+                              onChange={e => {
+                                const newSplits = [...formSplits];
+                                newSplits[idx].project = e.target.value;
+                                setFormSplits(newSplits);
+                              }}
+                              className="w-full text-[10px] border border-zinc-200 p-1.5 outline-none focus:border-zinc-800"
+                            >
+                              {activeProjects.map(p => <option key={p} value={p}>{p}</option>)}
+                            </select>
+                          </div>
+                          <div className="col-span-1 flex items-end justify-end pb-1 pb-1">
+                            <button 
+                              type="button" 
+                              onClick={() => {
+                                setFormSplits(formSplits.filter(s => s.id !== split.id));
+                              }}
+                              className="text-red-600 hover:text-red-800 font-bold text-xs"
+                            >
+                              &times;
+                            </button>
+                          </div>
+                          <div className="col-span-12 mt-1">
+                            <input
+                              type="text"
+                              placeholder="Примечание к части (опционально)"
+                              value={split.notes}
+                              onChange={e => {
+                                const newSplits = [...formSplits];
+                                newSplits[idx].notes = e.target.value;
+                                setFormSplits(newSplits);
+                              }}
+                              className="w-full text-[10px] border border-zinc-200 p-1.5 focus:border-zinc-800 outline-none"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          const currentSum = formSplits.reduce((acc, s) => acc + Number(s.amount || 0), 0);
+                          const remainder = Math.max(0, Number(formAmount || 0) - currentSum);
+                          setFormSplits([...formSplits, { id: `split-${Date.now()}`, amount: remainder, article: allArticles[0], project: activeProjects[0], notes: '' }]);
+                        }}
+                        className="w-full py-2 border border-zinc-300 text-xs text-zinc-600 font-bold uppercase tracking-wider hover:bg-zinc-100 transition-colors bg-white mt-2 cursor-pointer"
+                      >
+                        + Добавить часть операции
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {formType === 'transfer' && (
+                <div className="space-y-5 animate-fade-in">
+                  {/* ОТКУДА */}
+                  <div className="p-4 bg-zinc-50 border border-zinc-200 space-y-4">
+                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-200 pb-1.5">ОТКУДА</div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Дата списания</label>
                         <input
-                          type="text"
-                          placeholder="Примечание к части (опционально)"
-                          value={split.notes}
-                          onChange={e => {
-                            const newSplits = [...formSplits];
-                            newSplits[idx].notes = e.target.value;
-                            setFormSplits(newSplits);
+                          type="date"
+                          value={formDate}
+                          onChange={(e) => {
+                            setFormDate(e.target.value);
+                            setFormToDate(e.target.value); // Sync deposit date by default
                           }}
-                          className="w-full text-[10px] border border-zinc-200 p-1.5 focus:border-zinc-800 outline-none"
+                          required
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-white font-mono focus:border-zinc-800 outline-none"
                         />
                       </div>
+                      <div className="space-y-1.5 flex flex-col justify-end">
+                        <label className="flex items-center gap-2 border border-zinc-200 p-2.5 text-xs font-bold text-zinc-750 bg-white rounded-none cursor-pointer hover:bg-zinc-50 select-none">
+                          <input
+                            type="checkbox"
+                            checked={formIsConfirmed}
+                            onChange={(e) => setFormIsConfirmed(e.target.checked)}
+                            className="rounded-none border-zinc-300 text-zinc-900 focus:ring-zinc-800 w-4 h-4 shadow-none"
+                          />
+                          <span className="font-sans">Подтвердить оплату</span>
+                        </label>
+                      </div>
                     </div>
-                  ))}
-                  <button 
-                    type="button" 
-                    onClick={() => {
-                      const currentSum = formSplits.reduce((acc, s) => acc + Number(s.amount || 0), 0);
-                      const remainder = Math.max(0, Number(formAmount || 0) - currentSum);
-                      setFormSplits([...formSplits, { id: `split-${Date.now()}`, amount: remainder, article: allArticles[0], project: activeProjects[0], notes: '' }]);
-                    }}
-                    className="w-full py-2 border border-zinc-300 text-xs text-zinc-600 font-bold uppercase tracking-wider hover:bg-zinc-100 transition-colors bg-white mt-2 cursor-pointer"
-                  >
-                    + Добавить часть операции
-                  </button>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Счет списания</label>
+                        <select
+                          value={formAccountId}
+                          onChange={(e) => setFormAccountId(e.target.value)}
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                        >
+                          {subAccounts.map((sub) => (
+                            <option key={sub.id} value={sub.id}>
+                              {sub.name} [{sub.parentEntity}] ({formatCurrency(sub.balance, '')})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Сумма списания</label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="0"
+                            value={formAmount}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\D/g, '');
+                              setFormAmount(val);
+                              setFormToAmount(val); // Sync deposit amount by default
+                            }}
+                            required
+                            className="w-full text-xs border border-zinc-200 rounded-none p-2.5 pl-3 pr-10 text-zinc-800 bg-white font-mono font-bold focus:outline-none focus:border-zinc-800"
+                          />
+                          <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">₸</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Проект</label>
+                      <select
+                        value={formProject}
+                        onChange={(e) => setFormProject(e.target.value)}
+                        className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                      >
+                        {projects.map((proj) => (
+                          <option key={proj.id} value={proj.name}>{proj.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* КУДА */}
+                  <div className="p-4 bg-zinc-50 border border-zinc-200 space-y-4">
+                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-200 pb-1.5">КУДА</div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Дата зачисления</label>
+                        <input
+                          type="date"
+                          value={formToDate}
+                          onChange={(e) => setFormToDate(e.target.value)}
+                          required
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-white font-mono focus:border-zinc-800 outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1.5"></div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Счет зачисления</label>
+                        <select
+                          value={formToAccountId}
+                          onChange={(e) => setFormToAccountId(e.target.value)}
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                        >
+                          {subAccounts.map((sub) => (
+                            <option key={sub.id} value={sub.id}>
+                              {sub.name} [{sub.parentEntity}] ({formatCurrency(sub.balance, '')})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Сумма зачисления</label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="0"
+                            value={formToAmount}
+                            onChange={(e) => setFormToAmount(e.target.value.replace(/\D/g, ''))}
+                            required
+                            className="w-full text-xs border border-zinc-200 rounded-none p-2.5 pl-3 pr-10 text-zinc-800 bg-white font-mono font-bold focus:outline-none focus:border-zinc-800"
+                          />
+                          <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">₸</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {formType === 'accrual' && (
+                <div className="space-y-5 animate-fade-in">
+                  {/* ДЕБЕТ */}
+                  <div className="p-4 bg-zinc-50 border border-zinc-200 space-y-4">
+                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-200 pb-1.5">ДЕБЕТ</div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Дата начисления</label>
+                        <input
+                          type="date"
+                          value={formDate}
+                          onChange={(e) => setFormDate(e.target.value)}
+                          required
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-white font-mono focus:border-zinc-800 outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1.5 flex flex-col justify-end">
+                        <label className="flex items-center gap-2 border border-zinc-200 p-2.5 text-xs font-bold text-zinc-750 bg-white rounded-none cursor-pointer hover:bg-zinc-50 select-none">
+                          <input
+                            type="checkbox"
+                            checked={formIsConfirmed}
+                            onChange={(e) => setFormIsConfirmed(e.target.checked)}
+                            className="rounded-none border-zinc-300 text-zinc-900 focus:ring-zinc-800 w-4 h-4 shadow-none"
+                          />
+                          <span className="font-sans">Подтвердить начисление</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Юрлицо</label>
+                        <select
+                          value={formLegalEntity}
+                          onChange={(e) => setFormLegalEntity(e.target.value)}
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                        >
+                          {legalEntities.map((le) => (
+                            <option key={le.id} value={le.code}>{le.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Сумма</label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="0"
+                            value={formAmount}
+                            onChange={(e) => setFormAmount(e.target.value.replace(/\D/g, ''))}
+                            required
+                            className="w-full text-xs border border-zinc-200 rounded-none p-2.5 pl-3 pr-10 text-zinc-800 bg-white font-mono font-bold focus:outline-none focus:border-zinc-800"
+                          />
+                          <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">₸</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider font-semibold">Статья по дебету</label>
+                      <select
+                        value={formDebitArticle}
+                        onChange={(e) => setFormDebitArticle(e.target.value)}
+                        className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-855 bg-white outline-none focus:border-zinc-800"
+                      >
+                        {categories.map((cat) => (
+                          <option key={cat.id} value={cat.name}>{cat.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-2 border border-zinc-200 p-2.5 text-xs font-bold text-zinc-700 bg-white rounded-none cursor-pointer hover:bg-zinc-50 select-none">
+                      <input
+                        type="checkbox"
+                        checked={formAccrualCashMethod}
+                        onChange={(e) => setFormAccrualCashMethod(e.target.checked)}
+                        id="edit-accrual-cash-method"
+                        className="w-4 h-4 cursor-pointer accent-zinc-900 rounded-none border-zinc-300"
+                      />
+                      <label htmlFor="edit-accrual-cash-method" className="cursor-pointer font-sans select-none">Учитывать в ОПиУ кассовым методом</label>
+                    </div>
+                  </div>
+
+                  {/* КРЕДИТ */}
+                  <div className="p-4 bg-zinc-50 border border-zinc-200 space-y-4">
+                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-200 pb-1.5">КРЕДИТ</div>
+                    
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider font-semibold">Статья по кредиту</label>
+                      <select
+                        value={formCreditArticle}
+                        onChange={(e) => setFormCreditArticle(e.target.value)}
+                        className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                      >
+                        {categories.map((cat) => (
+                          <option key={cat.id} value={cat.name}>{cat.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                 </div>
               )}
 

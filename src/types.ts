@@ -33,6 +33,18 @@ export interface Transaction {
   isRecurring?: boolean;
   recurringFrequency?: 'weekly' | 'monthly' | 'yearly';
   splits?: TransactionSplit[];
+
+  // Transfer fields
+  toAccountId?: string;
+  toAccountName?: string;
+  toAmount?: number;
+  toDate?: string;
+
+  // Accrual fields
+  legalEntity?: string;
+  debitArticle?: string;
+  creditArticle?: string;
+  accrualCashMethod?: boolean;
 }
 
 export interface UserRole {
