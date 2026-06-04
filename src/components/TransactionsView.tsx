@@ -236,11 +236,17 @@ export default function TransactionsView({
     project: '',
     contragent: '',
     account: '',
-    notes: ''
+    notes: '',
+    toAccount: '',
+    toAmount: '',
+    creditArticle: '',
+    legalEntity: ''
   });
   const [typeOption, setTypeOption] = useState<'column' | 'sign'>('sign');
   const [typeIncomeValue, setTypeIncomeValue] = useState<string>('Приход');
   const [typeExpenseValue, setTypeExpenseValue] = useState<string>('Расход');
+  const [typeTransferValue, setTypeTransferValue] = useState<string>('Перемещение');
+  const [typeAccrualValue, setTypeAccrualValue] = useState<string>('Начисление');
 
   // Detected metadata
   const [detectedNewCategories, setDetectedNewCategories] = useState<{ name: string; inferredType: string; isChild: boolean; parentName?: string }[]>([]);
@@ -913,7 +919,11 @@ export default function TransactionsView({
       project: '',
       contragent: '',
       account: '',
-      notes: ''
+      notes: '',
+      toAccount: '',
+      toAmount: '',
+      creditArticle: '',
+      legalEntity: ''
     };
 
     const lowerHeaders = headers.map(h => h.toLowerCase());
@@ -936,6 +946,10 @@ export default function TransactionsView({
     mapping.contragent = findMatch(['контрагент', 'партнер', 'клиент', 'плательщик', 'получатель', 'contragent', 'partner', 'client', 'фио']);
     mapping.account = findMatch(['счет', 'кошелек', 'касса', 'iban', 'расчсчет', 'account', 'wallet']);
     mapping.notes = findMatch(['примечание', 'комментарий', 'описание', 'назначение платежа', 'notes', 'comment', 'description']);
+    mapping.toAccount = findMatch(['получатель счет', 'счет получателя', 'куда', 'to account', 'toaccount']);
+    mapping.toAmount = findMatch(['сумма получателя', 'to amount', 'toamount']);
+    mapping.creditArticle = findMatch(['статья кредит', 'кредит статья', 'credit article', 'creditarticle']);
+    mapping.legalEntity = findMatch(['юр лицо', 'юрлицо', 'организация', 'компания', 'legal entity', 'legalentity']);
 
     return mapping;
   };
@@ -1125,6 +1139,12 @@ export default function TransactionsView({
         const typeStr = String(rawType).trim().toLowerCase();
         if (typeStr === typeIncomeValue.toLowerCase()) {
           txType = 'income';
+        } else if (typeStr === typeTransferValue.toLowerCase()) {
+          txType = 'transfer';
+        } else if (typeStr === typeAccrualValue.toLowerCase()) {
+          txType = 'accrual';
+        } else if (typeStr === typeExpenseValue.toLowerCase()) {
+          txType = 'expense';
         } else {
           txType = 'expense';
         }
@@ -1192,16 +1212,56 @@ export default function TransactionsView({
         }
       }
 
+      // Transfer specific columns
+      const rawToAccount = columnMapping.toAccount ? row[columnMapping.toAccount] : '';
+      const rawToAmount = columnMapping.toAmount ? row[columnMapping.toAmount] : '';
+      const toAccountName = String(rawToAccount).trim();
+
+      if (txType === 'transfer' && toAccountName) {
+        const toAccountExists = subAccounts.some(s => s.name.toLowerCase() === toAccountName.toLowerCase() || s.id === toAccountName);
+        if (!toAccountExists) {
+          newSubAccountsSet.add(toAccountName);
+        }
+      }
+
+      let toAmt = numAmount;
+      if (rawToAmount) {
+        const parsedToAmt = typeof rawToAmount === 'number' ? rawToAmount : parseFloat(String(rawToAmount).replace(/\s/g, '').replace(/,/g, '.'));
+        if (!isNaN(parsedToAmt)) {
+          toAmt = parsedToAmt;
+        }
+      }
+
+      // Accrual specific columns
+      const rawCreditArticle = columnMapping.creditArticle ? row[columnMapping.creditArticle] : '';
+      const rawLegalEntity = columnMapping.legalEntity ? row[columnMapping.legalEntity] : '';
+      const creditCategoryName = String(rawCreditArticle).trim();
+
+      if (txType === 'accrual' && creditCategoryName) {
+        const creditExists = categories.some(c => c.name.toLowerCase() === creditCategoryName.toLowerCase());
+        if (!creditExists) {
+          newCategoriesMap[creditCategoryName.toLowerCase()] = {
+            name: creditCategoryName,
+            inferredType: 'expense',
+            isChild: false
+          };
+        }
+      }
+
       parsedTxs.push({
         id: `imported-mig-${idx}-${Date.now()}-${Math.random()}`,
         date: parsedDate,
         type: txType,
         amount: numAmount,
         accountOriginalName: accountName || 'Наличные',
+        toAccountOriginalName: toAccountName,
+        toAmount: toAmt,
         contragent: String(rawContragent).trim() || 'Не указан',
-        article: categoryName || 'Прочие доходы',
+        article: txType === 'transfer' ? 'Перемещение' : (categoryName || 'Прочие доходы'),
         project: projectName || 'Без проекта',
         notes: String(rawNotes).trim(),
+        creditArticle: creditCategoryName,
+        legalEntity: String(rawLegalEntity).trim(),
         _originalAmountWasZero: originalAmount === 0,
         splits: []
       });
@@ -1335,6 +1395,45 @@ export default function TransactionsView({
         });
       }
 
+      // Transfer specific
+      let toAccountId = undefined;
+      let toAccountName = undefined;
+      let toAmount = undefined;
+      let toDate = undefined;
+
+      if (tx.type === 'transfer') {
+        const lowerToAcc = tx.toAccountOriginalName?.toLowerCase() || '';
+        toAccountId = accountMapping[lowerToAcc] || subAccounts[1]?.id || subAccounts[0]?.id || '2';
+        const toAcc = createdSubAccounts.find(s => s.id === toAccountId) || subAccounts.find(s => s.id === toAccountId);
+        toAccountName = toAcc ? toAcc.name : tx.toAccountOriginalName;
+        toAmount = tx.toAmount || tx.amount;
+        toDate = tx.date;
+      }
+
+      // Accrual specific
+      let legalEntity = undefined;
+      let debitArticle = undefined;
+      let creditArticle = undefined;
+      let accrualCashMethod = undefined;
+
+      if (tx.type === 'accrual') {
+        legalEntity = tx.legalEntity || legalEntities[0]?.code || 'NOVA';
+        debitArticle = displayArticle;
+        
+        let displayCredit = tx.creditArticle || 'Прочие доходы';
+        for (const delim of delimiters) {
+          if (displayCredit.includes(delim)) {
+            const parts = displayCredit.split(delim).map((x: string) => x.trim()).filter(Boolean);
+            if (parts.length > 1) {
+              displayCredit = parts[1];
+            }
+            break;
+          }
+        }
+        creditArticle = displayCredit;
+        accrualCashMethod = false;
+      }
+
       return {
         id: tx.id,
         date: tx.date,
@@ -1343,11 +1442,23 @@ export default function TransactionsView({
         accountId: mappedAccId,
         accountName,
         contragent: tx.contragent,
-        article: displayArticle,
+        article: tx.type === 'transfer' ? 'Перемещение' : displayArticle,
         project: tx.project,
         isConfirmed: true,
         notes: tx.notes,
-        splits: mappedSplits
+        splits: mappedSplits,
+        
+        // Transfer specific
+        toAccountId,
+        toAccountName,
+        toAmount,
+        toDate,
+
+        // Accrual specific
+        legalEntity,
+        debitArticle,
+        creditArticle,
+        accrualCashMethod
       };
     });
 
@@ -1356,6 +1467,10 @@ export default function TransactionsView({
       newTransactions.forEach(tx => {
         if (tx.accountId === acc.id) {
           balanceChange += getImpact(tx.type, tx.amount, true);
+        }
+        if (tx.type === 'transfer' && tx.toAccountId === acc.id) {
+          const toAmt = tx.toAmount !== undefined ? tx.toAmount : tx.amount;
+          balanceChange += toAmt;
         }
       });
       return { ...acc, balance: acc.balance + balanceChange };
@@ -3527,6 +3642,26 @@ export default function TransactionsView({
                             className="w-full text-xs p-2 border border-zinc-200 bg-white outline-none"
                           />
                         </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block">Значение для Перемещения</label>
+                          <input
+                            type="text"
+                            value={typeTransferValue}
+                            onChange={e => setTypeTransferValue(e.target.value)}
+                            placeholder="Перемещение"
+                            className="w-full text-xs p-2 border border-zinc-200 bg-white outline-none"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block">Значение для Начисления</label>
+                          <input
+                            type="text"
+                            value={typeAccrualValue}
+                            onChange={e => setTypeAccrualValue(e.target.value)}
+                            placeholder="Начисление"
+                            className="w-full text-xs p-2 border border-zinc-200 bg-white outline-none"
+                          />
+                        </div>
                       </div>
                     </div>
                   )}
@@ -3599,6 +3734,66 @@ export default function TransactionsView({
                     <option value="">-- Пропустить --</option>
                     {fileHeaders.map(h => <option key={h} value={h}>{h}</option>)}
                   </select>
+                </div>
+
+                {/* Transfer fields (optional) */}
+                <div className="p-4 border border-zinc-200 bg-zinc-50/50 space-y-4">
+                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Для Перемещений (Переводов)</span>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Счет-получатель (Куда)</label>
+                      <select
+                        value={columnMapping.toAccount}
+                        onChange={e => setColumnMapping({ ...columnMapping, toAccount: e.target.value })}
+                        className="w-full text-xs p-2.5 border border-zinc-200 bg-white outline-none focus:bg-white"
+                      >
+                        <option value="">-- Пропустить --</option>
+                        {fileHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Сумма получателя (если отличается)</label>
+                      <select
+                        value={columnMapping.toAmount}
+                        onChange={e => setColumnMapping({ ...columnMapping, toAmount: e.target.value })}
+                        className="w-full text-xs p-2.5 border border-zinc-200 bg-white outline-none focus:bg-white"
+                      >
+                        <option value="">-- Пропустить (Использовать общую сумму) --</option>
+                        {fileHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Accrual fields (optional) */}
+                <div className="p-4 border border-zinc-200 bg-zinc-50/50 space-y-4">
+                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Для Начислений</span>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Кредит Статья / Категория</label>
+                      <select
+                        value={columnMapping.creditArticle}
+                        onChange={e => setColumnMapping({ ...columnMapping, creditArticle: e.target.value })}
+                        className="w-full text-xs p-2.5 border border-zinc-200 bg-white outline-none focus:bg-white"
+                      >
+                        <option value="">-- Пропустить --</option>
+                        {fileHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Организация / Юрлицо</label>
+                      <select
+                        value={columnMapping.legalEntity}
+                        onChange={e => setColumnMapping({ ...columnMapping, legalEntity: e.target.value })}
+                        className="w-full text-xs p-2.5 border border-zinc-200 bg-white outline-none focus:bg-white"
+                      >
+                        <option value="">-- Пропустить --</option>
+                        {fileHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Buttons */}
