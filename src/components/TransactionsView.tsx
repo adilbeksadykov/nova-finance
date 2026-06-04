@@ -699,6 +699,48 @@ export default function TransactionsView({
     return result;
   };
 
+  // Helper to dynamically locate the header row by searching for common transaction fields in the first few rows
+  const detectHeaderRowIndex = (grid: any[][]): number => {
+    const keywords = [
+      'дата', 'date', 'время',
+      'сумма', 'amount', 'объем', 'sum', 'платеж',
+      'тип', 'type', 'направление',
+      'статья', 'категория', 'category', 'article',
+      'проект', 'project',
+      'контрагент', 'клиент', 'плательщик', 'получатель', 'contragent', 'partner', 'client',
+      'счет', 'кошелек', 'касса', 'iban', 'расчсчет', 'account', 'wallet',
+      'примечание', 'комментарий', 'описание', 'notes', 'comment'
+    ];
+
+    let bestIndex = 0;
+    let maxScore = -1;
+
+    const scanLimit = Math.min(grid.length, 15);
+    for (let r = 0; r < scanLimit; r++) {
+      const row = grid[r];
+      if (!row || row.length === 0) continue;
+      
+      let score = 0;
+      row.forEach(cell => {
+        const val = String(cell).trim().toLowerCase();
+        if (!val) return;
+        if (keywords.some(kw => val.includes(kw))) {
+          score++;
+        }
+      });
+
+      if (score > maxScore) {
+        maxScore = score;
+        bestIndex = r;
+      }
+    }
+
+    if (maxScore > 0) {
+      return bestIndex;
+    }
+    return 0;
+  };
+
   const parseCSVText = (text: string): { headers: string[]; rows: any[] } => {
     const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
     if (lines.length === 0) return { headers: [], rows: [] };
@@ -708,11 +750,14 @@ export default function TransactionsView({
     const semiCount = (firstLine.match(/;/g) || []).length;
     const separator = semiCount > commaCount ? ';' : ',';
 
-    const headers = parseCSVLine(firstLine, separator);
+    const parsedGrid = lines.map(line => parseCSVLine(line, separator));
+    const headerRowIndex = detectHeaderRowIndex(parsedGrid);
+    
+    const headers = (parsedGrid[headerRowIndex] || []).map(h => String(h).trim()).filter(Boolean);
     const rows: any[] = [];
     
-    for (let i = 1; i < lines.length; i++) {
-      const values = parseCSVLine(lines[i], separator);
+    for (let i = headerRowIndex + 1; i < parsedGrid.length; i++) {
+      const values = parsedGrid[i];
       const row: Record<string, string> = {};
       headers.forEach((header, index) => {
         row[header] = values[index] !== undefined ? values[index] : '';
@@ -790,19 +835,21 @@ export default function TransactionsView({
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
           
-          const rows: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
-          if (rows.length === 0) {
+          const rawGrid: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+          if (rawGrid.length === 0) {
             alert('Файл Excel пуст');
             return;
           }
           
-          const rawGrid: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-          const headers = (rawGrid[0] || []).map(h => String(h).trim()).filter(Boolean);
+          const headerRowIndex = detectHeaderRowIndex(rawGrid);
+          const headers = (rawGrid[headerRowIndex] || []).map(h => String(h).trim()).filter(Boolean);
           
           if (headers.length === 0) {
             alert('Не удалось определить заголовки колонок в файле Excel');
             return;
           }
+
+          const rows: any[] = XLSX.utils.sheet_to_json(worksheet, { range: headerRowIndex, defval: '' });
 
           setRawRows(rows);
           setFileHeaders(headers);
