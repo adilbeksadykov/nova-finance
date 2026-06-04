@@ -1248,6 +1248,64 @@ export default function TransactionsView({
         }
       }
 
+      // Check if we need to pair this transfer row (two-row transfer representation)
+      let paired = false;
+      if (txType === 'transfer' && !toAccountName) {
+        // Find all matching unpaired transfers
+        const candidates = parsedTxs
+          .map((ptx, pIdx) => ({ ptx, pIdx }))
+          .filter(({ ptx }) => 
+            ptx.type === 'transfer' && 
+            ptx._isUnpairedTransfer && 
+            ptx.date === parsedDate &&
+            ((ptx._originalRawAmount < 0 && originalAmount > 0) || (ptx._originalRawAmount > 0 && originalAmount < 0))
+          );
+
+        if (candidates.length > 0) {
+          // Select the best candidate
+          let bestIndex = -1;
+          
+          // Heuristic 1: Match by reference code in notes (at least 6 consecutive digits)
+          const currentNotesRef = String(rawNotes).match(/\d{6,}/)?.[0];
+          if (currentNotesRef) {
+            bestIndex = candidates.findIndex(({ ptx }) => {
+              const ptxRef = ptx.notes.match(/\d{6,}/)?.[0];
+              return ptxRef && ptxRef === currentNotesRef;
+            });
+          }
+
+          // Heuristic 2: Match by exact absolute amount
+          if (bestIndex === -1) {
+            bestIndex = candidates.findIndex(({ ptx }) => Math.abs(ptx._originalRawAmount) === Math.abs(originalAmount));
+          }
+
+          // Heuristic 3: Default to the most recent unpaired transfer (likely consecutive)
+          if (bestIndex === -1) {
+            bestIndex = candidates.length - 1;
+          }
+
+          const { ptx: unpairedTx } = candidates[bestIndex];
+          if (unpairedTx._originalRawAmount < 0) {
+            // unpairedTx is withdrawal (source), current row is deposit (destination)
+            unpairedTx.toAccountOriginalName = accountName;
+            unpairedTx.toAmount = Math.abs(numAmount);
+          } else {
+            // unpairedTx is deposit (destination), current row is withdrawal (source)
+            unpairedTx.toAccountOriginalName = unpairedTx.accountOriginalName;
+            unpairedTx.toAmount = unpairedTx.amount;
+            
+            unpairedTx.accountOriginalName = accountName;
+            unpairedTx.amount = Math.abs(numAmount);
+          }
+          unpairedTx._isUnpairedTransfer = false;
+          paired = true;
+        }
+      }
+
+      if (paired) {
+        return; // Skip adding this row as a new transaction since it's now merged
+      }
+
       parsedTxs.push({
         id: `imported-mig-${idx}-${Date.now()}-${Math.random()}`,
         date: parsedDate,
@@ -1263,6 +1321,8 @@ export default function TransactionsView({
         creditArticle: creditCategoryName,
         legalEntity: String(rawLegalEntity).trim(),
         _originalAmountWasZero: originalAmount === 0,
+        _originalRawAmount: originalAmount,
+        _isUnpairedTransfer: txType === 'transfer' && !toAccountName,
         splits: []
       });
     });
