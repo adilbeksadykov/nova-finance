@@ -1,0 +1,6 @@
+{
+  "name": "Nova Finance",
+  "description": "A modern, intuitive finance tracking and planning system for Nova Education, featuring balance sheets, cash flows, profits, accounts, and budgets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
