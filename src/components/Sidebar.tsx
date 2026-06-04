@@ -22,6 +22,7 @@ interface SidebarProps {
   totalBalance: number;
   onBalanceClick: () => void;
   userEmail: string;
+  onLogout: () => void;
 }
 
 export default function Sidebar({ 
@@ -29,7 +30,8 @@ export default function Sidebar({
   setCurrentTab, 
   totalBalance, 
   onBalanceClick,
-  userEmail 
+  userEmail,
+  onLogout
 }: SidebarProps) {
   const [isPlanOpen, setIsPlanOpen] = useState(false);
   const [isDirectoriesOpen, setIsDirectoriesOpen] = useState(true);
@@ -213,6 +215,29 @@ export default function Sidebar({
           </li>
         </ul>
       </nav>
+
+      {/* User profile footer */}
+      <div className="p-4 border-t border-slate-700/60 flex flex-col gap-2 bg-slate-900/20">
+        <div className="flex items-center gap-3 overflow-hidden">
+          <div className="w-8 h-8 rounded-full bg-teal-500/10 text-teal-400 flex items-center justify-center font-bold text-sm shrink-0 border border-teal-500/20 font-mono">
+            {userEmail ? userEmail.substring(0, 1).toUpperCase() : 'U'}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[11px] font-semibold text-slate-100 truncate">{userEmail ? userEmail.split('@')[0] : 'User'}</div>
+            <div className="text-[10px] text-slate-400 truncate">{userEmail || ''}</div>
+          </div>
+        </div>
+        
+        {/* Logout button */}
+        <button
+          onClick={onLogout}
+          className="w-full flex items-center justify-center gap-1.5 mt-2 px-3 py-1.5 border border-slate-700/80 hover:bg-slate-700/40 text-[11px] text-slate-300 hover:text-white transition-colors cursor-pointer rounded-md font-sans"
+        >
+          <MoreHorizontal size={14} className="rotate-90 shrink-0 text-slate-400" />
+          <span>Выйти из аккаунта</span>
+        </button>
+      </div>
+
     </div>
   );
 }
