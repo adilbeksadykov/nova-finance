@@ -1019,13 +1019,101 @@ export default function TransactionsView({
       const rawAccount = columnMapping.account ? row[columnMapping.account] : '';
       const rawNotes = columnMapping.notes ? row[columnMapping.notes] : '';
 
-      if (rawDate === undefined || rawAmount === undefined) return;
+      const isSplitRow = !!(columnMapping.type && (String(rawType).trim().toLowerCase() === 'часть' || String(rawType).trim().toLowerCase() === 'part'));
+      const hasParent = parsedTxs.length > 0;
+      const skipDateCheck = isSplitRow && hasParent;
 
-      const parsedDate = parseDateString(rawDate);
+      if ((!skipDateCheck && rawDate === undefined) || rawAmount === undefined) return;
+
       let numAmount = typeof rawAmount === 'number' ? rawAmount : parseFloat(String(rawAmount).replace(/\s/g, '').replace(/,/g, '.'));
       if (isNaN(numAmount)) return;
 
+      const categoryName = String(rawArticle).trim();
+      const projectName = String(rawProject).trim();
+
+      if (isSplitRow && hasParent) {
+        const parentTx = parsedTxs[parsedTxs.length - 1];
+        const splitAmount = Math.abs(numAmount);
+
+        parentTx.article = '(Сплит-операция)';
+        parentTx.project = '(Несколько)';
+
+        if (!parentTx.splits) {
+          parentTx.splits = [];
+        }
+
+        parentTx.splits.push({
+          id: `split-${idx}-${Date.now()}-${Math.random()}`,
+          amount: splitAmount,
+          article: categoryName || 'Прочие доходы',
+          project: projectName || 'Без проекта',
+          notes: String(rawNotes).trim()
+        });
+
+        if (parentTx._originalAmountWasZero) {
+          parentTx.amount += splitAmount;
+        }
+
+        // Run category discovery on the split row
+        if (categoryName && categoryName !== 'Без статьи' && categoryName !== '(Сплит-операция)') {
+          const delimiters = [' / ', ' - ', ' \\ ', '/', '\\', '-'];
+          let splitCategory: string[] = [];
+          for (const delim of delimiters) {
+            if (categoryName.includes(delim)) {
+              splitCategory = categoryName.split(delim).map(s => s.trim()).filter(Boolean);
+              break;
+            }
+          }
+
+          if (splitCategory.length > 1) {
+            const parentCategoryName = splitCategory[0];
+            const childCategoryName = splitCategory[1];
+
+            const parentExists = categories.some(c => c.name.toLowerCase() === parentCategoryName.toLowerCase());
+            if (!parentExists) {
+              newCategoriesMap[parentCategoryName.toLowerCase()] = {
+                name: parentCategoryName,
+                inferredType: parentTx.type,
+                isChild: false
+              };
+            }
+
+            const childExists = categories.some(c => c.name.toLowerCase() === childCategoryName.toLowerCase() && c.parentId);
+            if (!childExists) {
+              newCategoriesMap[categoryName.toLowerCase()] = {
+                name: childCategoryName,
+                inferredType: parentTx.type,
+                isChild: true,
+                parentName: parentCategoryName
+              };
+            }
+          } else {
+            const categoryExists = categories.some(c => c.name.toLowerCase() === categoryName.toLowerCase());
+            if (!categoryExists) {
+              newCategoriesMap[categoryName.toLowerCase()] = {
+                name: categoryName,
+                inferredType: parentTx.type,
+                isChild: false
+              };
+            }
+          }
+        }
+
+        // Run project discovery on the split row
+        if (projectName && projectName !== 'Без проекта' && projectName !== '(Несколько)') {
+          const projectExists = projects.some(p => p.name.toLowerCase() === projectName.toLowerCase());
+          if (!projectExists) {
+            newProjectsSet.add(projectName);
+          }
+        }
+
+        return;
+      }
+
+      // Normal row processing
+      const parsedDate = parseDateString(rawDate);
       let txType: 'income' | 'expense' | 'transfer' | 'accrual' = 'expense';
+      let originalAmount = numAmount;
       if (typeOption === 'sign') {
         if (numAmount >= 0) {
           txType = 'income';
@@ -1043,10 +1131,7 @@ export default function TransactionsView({
         numAmount = Math.abs(numAmount);
       }
 
-      const categoryName = String(rawArticle).trim();
-      let parentCategoryName = '';
-      let isChild = false;
-
+      // Run category discovery on the main row
       if (categoryName && categoryName !== 'Без статьи' && categoryName !== '(Сплит-операция)') {
         const delimiters = [' / ', ' - ', ' \\ ', '/', '\\', '-'];
         let splitCategory: string[] = [];
@@ -1058,9 +1143,8 @@ export default function TransactionsView({
         }
 
         if (splitCategory.length > 1) {
-          parentCategoryName = splitCategory[0];
+          const parentCategoryName = splitCategory[0];
           const childCategoryName = splitCategory[1];
-          isChild = true;
 
           const parentExists = categories.some(c => c.name.toLowerCase() === parentCategoryName.toLowerCase());
           if (!parentExists) {
@@ -1092,7 +1176,7 @@ export default function TransactionsView({
         }
       }
 
-      const projectName = String(rawProject).trim();
+      // Run project discovery on the main row
       if (projectName && projectName !== 'Без проекта' && projectName !== '(Несколько)') {
         const projectExists = projects.some(p => p.name.toLowerCase() === projectName.toLowerCase());
         if (!projectExists) {
@@ -1117,7 +1201,9 @@ export default function TransactionsView({
         contragent: String(rawContragent).trim() || 'Не указан',
         article: categoryName || 'Прочие доходы',
         project: projectName || 'Без проекта',
-        notes: String(rawNotes).trim()
+        notes: String(rawNotes).trim(),
+        _originalAmountWasZero: originalAmount === 0,
+        splits: []
       });
     });
 
@@ -1228,6 +1314,27 @@ export default function TransactionsView({
         displayArticle = splitCategory[1];
       }
 
+      // Map splits and clean up split category names
+      let mappedSplits = undefined;
+      if (tx.splits && tx.splits.length > 0) {
+        mappedSplits = tx.splits.map((s: any) => {
+          let splitArticle = s.article;
+          for (const delim of delimiters) {
+            if (s.article.includes(delim)) {
+              const parts = s.article.split(delim).map((x: string) => x.trim()).filter(Boolean);
+              if (parts.length > 1) {
+                splitArticle = parts[1];
+              }
+              break;
+            }
+          }
+          return {
+            ...s,
+            article: splitArticle
+          };
+        });
+      }
+
       return {
         id: tx.id,
         date: tx.date,
@@ -1239,7 +1346,8 @@ export default function TransactionsView({
         article: displayArticle,
         project: tx.project,
         isConfirmed: true,
-        notes: tx.notes
+        notes: tx.notes,
+        splits: mappedSplits
       };
     });
 
