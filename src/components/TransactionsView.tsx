@@ -48,7 +48,7 @@ function parse1CClientBank(text: string): {
   transactions: Parsed1CTransaction[];
   newAccounts: Parsed1CAccount[];
 } {
-  const lines = text.split('\n').map(l => l.trim());
+  const lines = text.split(/\r?\n|\r/).map(l => l.trim());
   const transactions: Parsed1CTransaction[] = [];
   const newAccountsMap: Record<string, Parsed1CAccount> = {};
 
@@ -605,7 +605,7 @@ export default function TransactionsView({
       const decoder = new TextDecoder('windows-1251');
       let text = decoder.decode(arrayBuffer);
       
-      if (text.includes('Кодировка=UTF-8') || text.includes('Кодировка=UTF8') || !text.includes('1CClientBankExchange')) {
+      if (!text.toLowerCase().includes('выписка') && !text.toLowerCase().includes('секциядокумент')) {
         const utfDecoder = new TextDecoder('utf-8');
         text = utfDecoder.decode(arrayBuffer);
       }
