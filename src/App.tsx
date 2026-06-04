@@ -101,8 +101,19 @@ export default function App() {
             const configData = configDocSnap.data();
             const txData = txDocSnap.data();
 
+            const shouldMigrateCategories = !configData.categories || configData.categories.length < 25;
+            const cats = shouldMigrateCategories ? INITIAL_ARTICLE_CATEGORIES : (configData.categories || INITIAL_ARTICLE_CATEGORIES);
+
+            if (shouldMigrateCategories) {
+              console.log('Migrating categories to the new list...');
+              await setDoc(configDocRef, {
+                ...configData,
+                categories: INITIAL_ARTICLE_CATEGORIES
+              });
+            }
+
             setSubAccounts(configData.subAccounts || []);
-            setCategories(configData.categories || INITIAL_ARTICLE_CATEGORIES);
+            setCategories(cats);
             setExchangeRates(configData.exchangeRates || INITIAL_EXCHANGE_RATES);
             setProjects(configData.projects || INITIAL_PROJECTS);
             setProjectGroups(configData.projectGroups || []);
