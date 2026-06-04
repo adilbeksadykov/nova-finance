@@ -344,6 +344,26 @@ export default function TransactionsView({
   const [expandedTxs, setExpandedTxs] = useState<Record<string, boolean>>({});
   const [selectedTxs, setSelectedTxs] = useState<string[]>([]);
 
+  // Bulk editing form states
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [bulkDate, setBulkDate] = useState('');
+  const [bulkIsConfirmed, setBulkIsConfirmed] = useState<'keep' | 'yes' | 'no'>('keep');
+  const [bulkAccountId, setBulkAccountId] = useState('');
+  const [bulkAmount, setBulkAmount] = useState('');
+  const [bulkToDate, setBulkToDate] = useState('');
+  const [bulkToAccountId, setBulkToAccountId] = useState('');
+  const [bulkToAmount, setBulkToAmount] = useState('');
+  const [bulkAccrualDate, setBulkAccrualDate] = useState('');
+  const [bulkAccrualIsConfirmed, setBulkAccrualIsConfirmed] = useState<'keep' | 'yes' | 'no'>('keep');
+  const [bulkLegalEntity, setBulkLegalEntity] = useState('');
+  const [bulkDebitArticle, setBulkDebitArticle] = useState('');
+  const [bulkCreditArticle, setBulkCreditArticle] = useState('');
+  const [bulkAccrualCashMethod, setBulkAccrualCashMethod] = useState<'keep' | 'yes' | 'no'>('keep');
+  const [bulkContragent, setBulkContragent] = useState('');
+  const [bulkArticle, setBulkArticle] = useState('');
+  const [bulkProject, setBulkProject] = useState('');
+  const [bulkNotes, setBulkNotes] = useState('');
+
   const selectedStats = useMemo(() => {
     const count = selectedTxs.length;
     let income = 0;
@@ -623,6 +643,84 @@ export default function TransactionsView({
     setTransactions(updatedTxs);
     setSubAccounts(prev => recalculateBalances(updatedTxs, prev));
     if (editingTx && selectedTxs.includes(editingTx.id)) setEditingTx(null);
+    setSelectedTxs([]);
+  };
+
+  const handleOpenBulkEdit = () => {
+    setBulkDate('');
+    setBulkIsConfirmed('keep');
+    setBulkAccountId('');
+    setBulkAmount('');
+    setBulkToDate('');
+    setBulkToAccountId('');
+    setBulkToAmount('');
+    setBulkAccrualDate('');
+    setBulkAccrualIsConfirmed('keep');
+    setBulkLegalEntity('');
+    setBulkDebitArticle('');
+    setBulkCreditArticle('');
+    setBulkAccrualCashMethod('keep');
+    setBulkContragent('');
+    setBulkArticle('');
+    setBulkProject('');
+    setBulkNotes('');
+    setIsBulkEditOpen(true);
+  };
+
+  const handleSaveBulkEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    const updatedTxs = transactions.map(tx => {
+      if (!selectedTxs.includes(tx.id)) return tx;
+      
+      const updated = { ...tx };
+      
+      // Apply payment fields (for income, expense, transfer)
+      if (tx.type === 'income' || tx.type === 'expense' || tx.type === 'transfer') {
+        if (bulkDate) updated.date = bulkDate;
+        if (bulkIsConfirmed !== 'keep') updated.isConfirmed = bulkIsConfirmed === 'yes';
+        if (bulkAccountId) {
+          updated.accountId = bulkAccountId;
+          updated.accountName = subAccounts.find(s => s.id === bulkAccountId)?.name || tx.accountName;
+        }
+      }
+      
+      // Apply transfer specific fields
+      if (tx.type === 'transfer') {
+        if (bulkToDate) updated.toDate = bulkToDate;
+        if (bulkToAccountId) {
+          updated.toAccountId = bulkToAccountId;
+          updated.toAccountName = subAccounts.find(s => s.id === bulkToAccountId)?.name || tx.toAccountName;
+        }
+        if (bulkToAmount) updated.toAmount = Number(bulkToAmount);
+      }
+      
+      // Apply accrual specific fields
+      if (tx.type === 'accrual') {
+        if (bulkAccrualDate) updated.date = bulkAccrualDate;
+        if (bulkAccrualIsConfirmed !== 'keep') updated.isConfirmed = bulkAccrualIsConfirmed === 'yes';
+        if (bulkLegalEntity) updated.legalEntity = bulkLegalEntity;
+        if (bulkDebitArticle) {
+          updated.debitArticle = bulkDebitArticle;
+          updated.article = bulkDebitArticle;
+        }
+        if (bulkCreditArticle) updated.creditArticle = bulkCreditArticle;
+        if (bulkAccrualCashMethod !== 'keep') updated.accrualCashMethod = bulkAccrualCashMethod === 'yes';
+      }
+      
+      // Common fields
+      if (bulkAmount) updated.amount = Number(bulkAmount);
+      if (bulkContragent) updated.contragent = bulkContragent;
+      if (bulkArticle && tx.type !== 'accrual' && tx.type !== 'transfer') updated.article = bulkArticle;
+      if (bulkProject) updated.project = bulkProject;
+      if (bulkNotes) updated.notes = bulkNotes;
+      
+      return updated;
+    });
+    
+    setTransactions(updatedTxs);
+    setSubAccounts(prev => recalculateBalances(updatedTxs, prev));
+    setIsBulkEditOpen(false);
     setSelectedTxs([]);
   };
 
@@ -2822,6 +2920,304 @@ export default function TransactionsView({
         </div>
       )}
 
+      {/* BULK EDIT MODAL */}
+      {isBulkEditOpen && (
+        <div className="fixed inset-0 bg-zinc-950/70 z-50 flex items-center justify-center backdrop-blur-xs transition-opacity animate-fade-in p-4">
+          <div className="w-full max-w-2xl bg-white border border-zinc-200 shadow-2xl flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-6 border-b border-zinc-200 flex items-center justify-between bg-zinc-900 text-white">
+              <div>
+                <h3 className="font-serif italic font-bold text-lg leading-none">Редактирование {selectedTxs.length} операций</h3>
+                <p className="text-[10px] text-zinc-400 uppercase tracking-widest mt-1">Некоторые поля недоступны для операций разного типа</p>
+              </div>
+              <button onClick={() => setIsBulkEditOpen(false)} className="text-zinc-400 hover:text-white transition-colors">
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleSaveBulkEdit} className="flex-1 overflow-y-auto p-6 space-y-5">
+              
+              {/* DATE OF PAYMENT & CONFIRM PAYMENT */}
+              <div className="grid grid-cols-2 gap-4 border border-zinc-200 p-4 bg-zinc-50">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Дата оплаты</label>
+                  <input
+                    type="date"
+                    value={bulkDate}
+                    onChange={(e) => setBulkDate(e.target.value)}
+                    className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-white font-mono focus:border-zinc-800 outline-none"
+                  />
+                  <p className="text-[9px] text-zinc-400 italic">Оставьте пустым, чтобы не изменять</p>
+                </div>
+                
+                <div className="space-y-1.5 flex flex-col justify-between">
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Подтвердить оплату</label>
+                  <select
+                    value={bulkIsConfirmed}
+                    onChange={(e) => setBulkIsConfirmed(e.target.value as any)}
+                    className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                  >
+                    <option value="keep">Оставить как есть</option>
+                    <option value="yes">Подтвердить (Да)</option>
+                    <option value="no">Снять подтверждение (Нет)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* ACCOUNT SELECTOR */}
+              <div className="grid grid-cols-2 gap-4 border border-zinc-200 p-4 bg-zinc-50">
+                <div className="space-y-1.5 col-span-2">
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Счет и юрлицо</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={bulkAccountId}
+                      onChange={(e) => setBulkAccountId(e.target.value)}
+                      className="flex-1 text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                    >
+                      <option value="">Оставить как есть</option>
+                      {subAccounts.map((sub) => (
+                        <option key={sub.id} value={sub.id}>{sub.name} [{sub.parentEntity}] ({formatCurrency(sub.balance, '')})</option>
+                      ))}
+                    </select>
+                    {bulkAccountId && (
+                      <button 
+                        type="button" 
+                        onClick={() => setBulkAccountId('')}
+                        className="px-3 border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-500 font-bold"
+                        title="Сбросить (Оставить как есть)"
+                      >
+                        &times;
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* AMOUNT */}
+              <div className="border border-zinc-200 p-4 bg-zinc-50 space-y-1.5">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Сумма валюты (KZT)</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Оставить как есть"
+                    value={bulkAmount}
+                    onChange={(e) => setBulkAmount(e.target.value.replace(/\D/g, ''))}
+                    className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-white font-mono focus:outline-none focus:border-zinc-800"
+                  />
+                  {bulkAmount && (
+                    <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">₸</span>
+                  )}
+                </div>
+              </div>
+
+              {/* DATE OF ACCRUAL & CONFIRM ACCRUAL */}
+              <div className="grid grid-cols-2 gap-4 border border-zinc-200 p-4 bg-zinc-50">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Дата начисления</label>
+                  <input
+                    type="date"
+                    value={bulkAccrualDate}
+                    onChange={(e) => setBulkAccrualDate(e.target.value)}
+                    className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-white font-mono focus:border-zinc-800 outline-none"
+                  />
+                  <p className="text-[9px] text-zinc-400 italic">Оставьте пустым, чтобы не изменять</p>
+                </div>
+                
+                <div className="space-y-1.5 flex flex-col justify-between">
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Подтвердить начисление</label>
+                  <select
+                    value={bulkAccrualIsConfirmed}
+                    onChange={(e) => setBulkAccrualIsConfirmed(e.target.value as any)}
+                    className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                  >
+                    <option value="keep">Оставить как есть</option>
+                    <option value="yes">Подтвердить (Да)</option>
+                    <option value="no">Снять подтверждение (Нет)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* TRANSFER/ACCRUAL EXTRAS */}
+              <div className="grid grid-cols-2 gap-4 border border-zinc-200 p-4 bg-zinc-50">
+                {/* Legal Entity for Accrual */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Юрлицо (только для начислений)</label>
+                  <select
+                    value={bulkLegalEntity}
+                    onChange={(e) => setBulkLegalEntity(e.target.value)}
+                    className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-855 bg-white outline-none focus:border-zinc-800"
+                  >
+                    <option value="">Оставить как есть</option>
+                    {legalEntities.map((le) => (
+                      <option key={le.id} value={le.code}>{le.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Cash Method for Accrual */}
+                <div className="space-y-1.5 flex flex-col justify-between">
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Кассовый метод в ОПиУ</label>
+                  <select
+                    value={bulkAccrualCashMethod}
+                    onChange={(e) => setBulkAccrualCashMethod(e.target.value as any)}
+                    className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                  >
+                    <option value="keep">Оставить как есть</option>
+                    <option value="yes">Учитывать кассовым методом</option>
+                    <option value="no">Не учитывать кассовым методом</option>
+                  </select>
+                </div>
+
+                {/* Debit & Credit Articles for Accruals */}
+                <div className="space-y-1.5 col-span-2 grid grid-cols-2 gap-4 pt-2">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Статья по дебету (начисление)</label>
+                    <select
+                      value={bulkDebitArticle}
+                      onChange={(e) => setBulkDebitArticle(e.target.value)}
+                      className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                    >
+                      <option value="">Оставить как есть</option>
+                      {categories.map((cat) => (
+                        <option key={cat.id} value={cat.name}>{cat.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Статья по кредиту (начисление)</label>
+                    <select
+                      value={bulkCreditArticle}
+                      onChange={(e) => setBulkCreditArticle(e.target.value)}
+                      className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                    >
+                      <option value="">Оставить как есть</option>
+                      {categories.map((cat) => (
+                        <option key={cat.id} value={cat.name}>{cat.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Transfer destination account */}
+                <div className="space-y-1.5 col-span-2 grid grid-cols-2 gap-4 pt-2 border-t border-zinc-200">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Счет зачисления (перемещение)</label>
+                    <select
+                      value={bulkToAccountId}
+                      onChange={(e) => setBulkToAccountId(e.target.value)}
+                      className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                    >
+                      <option value="">Оставить как есть</option>
+                      {subAccounts.map((sub) => (
+                        <option key={sub.id} value={sub.id}>{sub.name} [{sub.parentEntity}]</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Сумма зачисления (перемещение)</label>
+                    <input
+                      type="text"
+                      placeholder="Оставить как есть"
+                      value={bulkToAmount}
+                      onChange={(e) => setBulkToAmount(e.target.value.replace(/\D/g, ''))}
+                      className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-white font-mono focus:outline-none focus:border-zinc-800"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* COMMON FIELDS: CONTRAGENT, CATEGORY/ARTICLE, PROJECT */}
+              <div className="grid grid-cols-3 gap-4 border border-zinc-200 p-4 bg-zinc-50">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Контрагент</label>
+                  <input
+                    type="text"
+                    placeholder="Оставить как есть"
+                    value={bulkContragent}
+                    onChange={(e) => setBulkContragent(e.target.value)}
+                    className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white focus:outline-none focus:border-zinc-800"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Статья</label>
+                  <select
+                    value={bulkArticle}
+                    onChange={(e) => setBulkArticle(e.target.value)}
+                    className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                  >
+                    <option value="">Оставить как есть</option>
+                    {allArticles.map((art, idx) => (
+                      <option key={idx} value={art}>{art}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Проект</label>
+                  <select
+                    value={bulkProject}
+                    onChange={(e) => setBulkProject(e.target.value)}
+                    className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
+                  >
+                    <option value="">Оставить как есть</option>
+                    {activeProjects.map((p, idx) => (
+                      <option key={idx} value={p}>{p}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* MEMO NOTES */}
+              <div className="space-y-1.5 border border-zinc-200 p-4 bg-zinc-50">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider font-semibold">Назначение платежа</label>
+                <textarea
+                  placeholder="Оставить как есть"
+                  value={bulkNotes}
+                  onChange={(e) => setBulkNotes(e.target.value)}
+                  rows={2}
+                  className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-white focus:outline-none focus:border-zinc-800"
+                ></textarea>
+              </div>
+
+              {/* Buttons */}
+              <div className="flex justify-between items-center pt-4 border-t border-zinc-200">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm(`Вы уверены, что хотите удалить ${selectedTxs.length} операций?`)) {
+                      handleDeleteSelected();
+                      setIsBulkEditOpen(false);
+                    }
+                  }}
+                  className="bg-red-600 hover:bg-red-750 text-white rounded-none px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors"
+                >
+                  <Trash2 size={12} />
+                  <span>Удалить операции</span>
+                </button>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsBulkEditOpen(false)}
+                    className="border border-zinc-200 text-[10px] font-bold text-zinc-650 uppercase tracking-wider px-5 py-2.5 rounded-none hover:bg-zinc-50 transition-colors"
+                  >
+                    Отменить
+                  </button>
+                  <button
+                    type="submit"
+                    className="bg-teal-600 text-[10px] font-bold text-white uppercase tracking-wider px-5 py-2.5 rounded-none hover:bg-teal-700 transition-colors"
+                  >
+                    Сохранить
+                  </button>
+                </div>
+              </div>
+
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* IMPORT BANK STATEMENT MODAL */}
       {isImportOpen && (
         <div className="fixed inset-0 bg-zinc-950/70 z-50 flex items-center justify-center p-4 backdrop-blur-xs overflow-y-auto">
@@ -3567,6 +3963,13 @@ export default function TransactionsView({
             )}
           </div>
           <div className="flex items-center gap-2 ml-4 border-l border-zinc-700 pl-4">
+            <button
+              onClick={handleOpenBulkEdit}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-sm transition-colors uppercase tracking-wider"
+            >
+              <Edit3 size={14} />
+              Изменить
+            </button>
             <button
               onClick={handleExportSelected}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-sm transition-colors uppercase tracking-wider"
