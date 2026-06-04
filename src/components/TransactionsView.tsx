@@ -19,6 +19,153 @@ import {
 import { Transaction, SubAccount, ArticleCategory, Project, LegalEntity, TransactionSplit } from '../types';
 import { formatCurrency } from '../utils';
 
+interface Parsed1CTransaction {
+  id: string;
+  date: string;
+  type: 'income' | 'expense';
+  amount: number;
+  contragent: string;
+  contragentIban: string;
+  contragentBin: string;
+  ourIban: string;
+  ourName: string;
+  ourBin: string;
+  notes: string;
+  article: string;
+  project: string;
+  isConfirmed: boolean;
+}
+
+interface Parsed1CAccount {
+  iban: string;
+  legalEntityName: string;
+  legalEntityBin: string;
+  currency: string;
+  type: string;
+}
+
+function parse1CClientBank(text: string): {
+  transactions: Parsed1CTransaction[];
+  newAccounts: Parsed1CAccount[];
+} {
+  const lines = text.split('\n').map(l => l.trim());
+  const transactions: Parsed1CTransaction[] = [];
+  const newAccountsMap: Record<string, Parsed1CAccount> = {};
+
+  let currentDoc: any = null;
+  let inDocSection = false;
+  let ourCalculatedAccount = '';
+
+  for (const line of lines) {
+    if (line.startsWith('РасчСчет=')) {
+      ourCalculatedAccount = line.split('=')[1] || '';
+    }
+  }
+
+  for (const line of lines) {
+    if (line === 'СекцияДокумент=выписка') {
+      currentDoc = {};
+      inDocSection = true;
+      continue;
+    }
+    if (line === 'КонецДокумента') {
+      if (currentDoc) {
+        const docNum = currentDoc['НомерДокумента'] || '';
+        const dateRaw = currentDoc['ДатаОперации'] || currentDoc['ДатаДокумента'] || '';
+        
+        let dateFormatted = new Date().toISOString().slice(0, 10);
+        if (dateRaw) {
+          const parts = dateRaw.split('.');
+          if (parts.length === 3) {
+            dateFormatted = `${parts[2]}-${parts[1]}-${parts[0]}`;
+          }
+        }
+
+        const purpose = currentDoc['НазначениеПлатежа'] || '';
+        const rawAmountIncome = currentDoc['СуммаПриход'];
+        const rawAmountExpense = currentDoc['СуммаРасход'];
+        
+        const isIncome = !!rawAmountIncome;
+        const amount = Number(rawAmountIncome || rawAmountExpense || 0);
+        const type = isIncome ? 'income' : 'expense';
+
+        const senderName = currentDoc['ПлательщикНаименование'] || '';
+        const senderBin = currentDoc['ПлательщикБИН_ИИН'] || '';
+        const senderIban = currentDoc['ПлательщикИИК'] || '';
+
+        const receiverName = currentDoc['ПолучательНаименование'] || '';
+        const receiverBin = currentDoc['ПолучательБИН_ИИН'] || '';
+        const receiverIban = currentDoc['ПолучательИИК'] || '';
+
+        const ourIban = isIncome ? receiverIban : senderIban;
+        const ourName = isIncome ? receiverName : senderName;
+        const ourBin = isIncome ? receiverBin : senderBin;
+
+        const contragent = isIncome ? senderName : receiverName;
+        const contragentIban = isIncome ? senderIban : receiverIban;
+        const contragentBin = isIncome ? senderBin : receiverBin;
+
+        let matchedCategory = 'Прочее';
+        const purposeLower = purpose.toLowerCase();
+        if (purposeLower.includes('зарплат') || purposeLower.includes('оплата труда') || purposeLower.includes('зп')) {
+          matchedCategory = 'Зарплата';
+        } else if (purposeLower.includes('процессинг') || purposeLower.includes('комисси') || purposeLower.includes('услуги банка')) {
+          matchedCategory = 'Маркетинг';
+        } else if (purposeLower.includes('продаж') || purposeLower.includes('поступлен')) {
+          matchedCategory = 'Олимпиады';
+        } else if (purposeLower.includes('перевод собственных средств')) {
+          matchedCategory = 'Перевод';
+        }
+
+        transactions.push({
+          id: `import-${docNum}-${Date.now()}-${Math.random()}`,
+          date: dateFormatted,
+          type,
+          amount,
+          contragent,
+          contragentIban,
+          contragentBin,
+          ourIban: ourIban || ourCalculatedAccount,
+          ourName,
+          ourBin,
+          notes: purpose,
+          article: matchedCategory,
+          project: 'Без проекта',
+          isConfirmed: true,
+        });
+
+        const activeIban = ourIban || ourCalculatedAccount;
+        if (activeIban) {
+          newAccountsMap[activeIban] = {
+            iban: activeIban,
+            legalEntityName: ourName || 'ТОО "NOVA EDU"',
+            legalEntityBin: ourBin || '220540040973',
+            currency: '₸',
+            type: 'non-cash',
+          };
+        }
+      }
+      inDocSection = false;
+      currentDoc = null;
+      continue;
+    }
+
+    if (inDocSection && currentDoc) {
+      const idx = line.indexOf('=');
+      if (idx !== -1) {
+        const key = line.slice(0, idx).trim();
+        const value = line.slice(idx + 1).trim();
+        currentDoc[key] = value;
+      }
+    }
+  }
+
+  return {
+    transactions,
+    newAccounts: Object.values(newAccountsMap),
+  };
+}
+
 interface TransactionsViewProps {
   transactions: Transaction[];
   setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
@@ -70,6 +217,11 @@ export default function TransactionsView({
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
+
+  // Bank Import State
+  const [importPhase, setImportPhase] = useState<'select' | 'preview'>('select');
+  const [importTransactions, setImportTransactions] = useState<any[]>([]);
+  const [importNewAccounts, setImportNewAccounts] = useState<any[]>([]);
 
   // Quick Create Modal states
   const [createAccountModal, setCreateAccountModal] = useState(false);
@@ -441,6 +593,112 @@ export default function TransactionsView({
     document.body.removeChild(link);
     
     setSelectedTxs([]);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const arrayBuffer = event.target?.result as ArrayBuffer;
+      const decoder = new TextDecoder('windows-1251');
+      let text = decoder.decode(arrayBuffer);
+      
+      if (text.includes('Кодировка=UTF-8') || text.includes('Кодировка=UTF8') || !text.includes('1CClientBankExchange')) {
+        const utfDecoder = new TextDecoder('utf-8');
+        text = utfDecoder.decode(arrayBuffer);
+      }
+
+      const parsed = parse1CClientBank(text);
+
+      const detectedNewAccounts: any[] = [];
+      parsed.newAccounts.forEach((acc: any) => {
+        const match = subAccounts.find(
+          s => s.name.includes(acc.iban) || s.id === acc.iban || s.name.toLowerCase().includes(acc.iban.toLowerCase())
+        );
+        if (!match) {
+          const matchedLe = legalEntities.find(le => le.inn === acc.legalEntityBin);
+          
+          detectedNewAccounts.push({
+            iban: acc.iban,
+            name: `Расчетный счет Kaspi ${acc.iban.slice(-4)}`,
+            parentEntity: matchedLe ? matchedLe.code : (legalEntities[0]?.code || 'NOVA'),
+            type: 'non-cash',
+            currency: '₸',
+            balance: 0,
+            initialBalance: 0
+          });
+        }
+      });
+
+      const mappedTxs = parsed.transactions.map((tx: any) => {
+        const existingAcc = subAccounts.find(s => s.id === tx.ourIban || s.name.includes(tx.ourIban));
+        const newAcc = detectedNewAccounts.find(a => a.iban === tx.ourIban);
+        
+        return {
+          ...tx,
+          accountId: existingAcc ? existingAcc.id : tx.ourIban,
+          accountName: existingAcc ? existingAcc.name : (newAcc ? newAcc.name : `Счет ${tx.ourIban.slice(-4)}`)
+        };
+      });
+
+      setImportTransactions(mappedTxs);
+      setImportNewAccounts(detectedNewAccounts);
+      setImportPhase('preview');
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleConfirmImport = () => {
+    const createdAccounts: SubAccount[] = importNewAccounts.map(acc => ({
+      id: acc.iban,
+      name: acc.name,
+      parentEntity: acc.parentEntity,
+      type: acc.type,
+      balance: Number(acc.balance) || 0,
+      initialBalance: Number(acc.initialBalance) || 0,
+      currency: acc.currency
+    }));
+
+    if (createdAccounts.length > 0) {
+      setSubAccounts(prev => [...prev, ...createdAccounts]);
+    }
+
+    const newTxs: Transaction[] = importTransactions.map(tx => {
+      const targetAcc = createdAccounts.find(a => a.id === tx.accountId) || subAccounts.find(a => a.id === tx.accountId);
+      return {
+        id: tx.id,
+        date: tx.date,
+        type: tx.type,
+        amount: tx.amount,
+        accountId: tx.accountId,
+        accountName: targetAcc ? targetAcc.name : tx.accountName,
+        contragent: tx.contragent || 'Не указан',
+        article: tx.article,
+        project: tx.project,
+        isConfirmed: true,
+        notes: tx.notes
+      };
+    });
+
+    setSubAccounts(prev => prev.map(acc => {
+      let balanceChange = 0;
+      newTxs.forEach(tx => {
+        if (tx.accountId === acc.id) {
+          balanceChange += getImpact(tx.type, tx.amount, true);
+        }
+      });
+      return balanceChange !== 0 ? { ...acc, balance: acc.balance + balanceChange } : acc;
+    }));
+
+    setTransactions(prev => [...newTxs, ...prev]);
+    setIsImportOpen(false);
+    setImportPhase('select');
+    setImportTransactions([]);
+    setImportNewAccounts([]);
+    
+    alert(`Успешно импортировано операций: ${newTxs.length}. Создано новых счетов: ${createdAccounts.length}.`);
   };
 
   return (
@@ -1499,80 +1757,246 @@ export default function TransactionsView({
 
       {/* IMPORT BANK STATEMENT MODAL */}
       {isImportOpen && (
-        <div className="fixed inset-0 bg-zinc-950/70 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="w-full max-w-lg bg-white rounded-none overflow-hidden shadow-xl border border-zinc-350">
+        <div className="fixed inset-0 bg-zinc-950/70 z-50 flex items-center justify-center p-4 backdrop-blur-xs overflow-y-auto">
+          <div className={`w-full ${importPhase === 'preview' ? 'max-w-5xl' : 'max-w-lg'} bg-white rounded-none overflow-hidden shadow-xl border border-zinc-350 transition-all duration-300`}>
             <div className="p-6 border-b border-zinc-200 flex items-center justify-between bg-zinc-900 text-white">
               <div>
                 <h3 className="font-serif italic font-bold text-lg leading-none">Импортировать выписки</h3>
                 <p className="text-[10px] text-zinc-400 uppercase tracking-widest mt-1">Автоматическая состыковка с Kaspi, Halyk, 1С</p>
               </div>
-              <button onClick={() => setIsImportOpen(false)} className="text-zinc-400 hover:text-white transition-colors">
+              <button onClick={() => { setIsImportOpen(false); setImportPhase('select'); }} className="text-zinc-400 hover:text-white transition-colors cursor-pointer">
                 <X size={16} />
               </button>
             </div>
 
-            <div className="p-6 space-y-6">
-              
-              {/* Type Switcher */}
-              <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                <div className="p-3 border border-zinc-900 bg-zinc-50 text-zinc-950 rounded-none font-bold cursor-pointer flex flex-col items-center gap-1.5 uppercase text-[9px] tracking-wider">
-                  <CheckCircle2 size={15} />
-                  <span>Каспи Выписка (.txt)</span>
+            {importPhase === 'select' ? (
+              <div className="p-6 space-y-6">
+                {/* Type Switcher */}
+                <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                  <div className="p-3 border border-zinc-900 bg-zinc-50 text-zinc-950 rounded-none font-bold cursor-pointer flex flex-col items-center gap-1.5 uppercase text-[9px] tracking-wider">
+                    <CheckCircle2 size={15} className="text-emerald-500" />
+                    <span>Каспи Выписка (.txt)</span>
+                  </div>
+                  <div className="p-3 border border-zinc-200 text-zinc-400 hover:border-zinc-800 rounded-none cursor-pointer flex flex-col items-center gap-1.5 uppercase text-[9px] tracking-wider transition-all" onClick={() => alert('Пожалуйста, используйте текстовый формат выписки 1С/Kaspi')}>
+                    <FileSpreadsheet size={15} />
+                    <span>Excel Бюджет (.xlsx)</span>
+                  </div>
+                  <div className="p-3 border border-zinc-200 text-zinc-400 hover:border-zinc-800 rounded-none cursor-pointer flex flex-col items-center gap-1.5 uppercase text-[9px] tracking-wider transition-all" onClick={() => alert('Пожалуйста, используйте текстовый формат выписки 1С/Kaspi')}>
+                    <Upload size={15} />
+                    <span>1С Бухгалтерия (.xml)</span>
+                  </div>
                 </div>
-                <div className="p-3 border border-zinc-200 text-zinc-400 hover:border-zinc-800 rounded-none cursor-pointer flex flex-col items-center gap-1.5 uppercase text-[9px] tracking-wider transition-all">
-                  <FileSpreadsheet size={15} />
-                  <span>Excel Бюджет (.xlsx)</span>
+
+                {/* Interactive upload trigger */}
+                <div className="relative border-2 border-dashed border-zinc-200 hover:border-zinc-800 hover:bg-zinc-50 cursor-pointer p-8 rounded-none text-center space-y-2 select-none group transition-all">
+                  <input
+                    type="file"
+                    accept=".txt"
+                    onChange={handleFileChange}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                  <div className="h-10 w-10 bg-zinc-100 group-hover:bg-zinc-200 text-zinc-500 group-hover:text-zinc-900 rounded-none flex items-center justify-center mx-auto transition-colors">
+                    <Upload size={15} />
+                  </div>
+                  <div>
+                    <span className="font-bold text-zinc-800 text-xs hover:underline uppercase tracking-wider block">Выбрать файл выписки 1С/банк</span>
+                    <p className="text-[10px] text-zinc-400 mt-1 uppercase tracking-wider">поддерживается формат 1CClientBankExchange (.txt)</p>
+                  </div>
                 </div>
-                <div className="p-3 border border-zinc-200 text-zinc-400 hover:border-zinc-800 rounded-none cursor-pointer flex flex-col items-center gap-1.5 uppercase text-[9px] tracking-wider transition-all" >
-                  <Upload size={15} />
-                  <span>1С Бухгалтерия (.xml)</span>
+
+                {/* Status footer warnings */}
+                <div className="p-4 bg-zinc-50 rounded-none border border-zinc-200 text-[10px] text-zinc-500 leading-normal space-y-1">
+                  <span className="font-bold text-zinc-700 block uppercase tracking-wider">Интеллектуальное сопоставление ПланФакта</span>
+                  <p>Наша система автоматически сопоставит плательщика с базой контрагентов и назначит статьи доходов/расходов по ключевым фразам!</p>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsImportOpen(false)}
+                    className="flex-1 bg-zinc-100 hover:bg-zinc-200 text-[11px] font-bold text-zinc-650 uppercase tracking-widest py-3 rounded-none transition-colors cursor-pointer"
+                  >
+                    Отмена
+                  </button>
                 </div>
               </div>
+            ) : (
+              <div className="p-6 space-y-6">
+                
+                {/* 1. NEW ACCOUNTS CONFIGURATION */}
+                {importNewAccounts.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 border-b border-zinc-200 pb-1.5">
+                      <AlertCircle size={16} className="text-amber-500" />
+                      <span className="font-bold text-xs uppercase tracking-wider text-zinc-700">Обнаружены новые счета в файле ({importNewAccounts.length}):</span>
+                    </div>
+                    <div className="space-y-4 max-h-48 overflow-y-auto pr-1">
+                      {importNewAccounts.map((acc, index) => (
+                        <div key={acc.iban} className="p-4 bg-zinc-50 border border-zinc-200 space-y-3 rounded-none">
+                          <div className="text-[10px] font-mono text-zinc-500 truncate font-semibold">IBAN / Счет: {acc.iban}</div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                            <div>
+                              <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Название счета</label>
+                              <input
+                                type="text"
+                                required
+                                value={acc.name}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setImportNewAccounts(prev => prev.map((a, i) => i === index ? { ...a, name: val } : a));
+                                  setImportTransactions(prev => prev.map(tx => tx.accountId === acc.iban ? { ...tx, accountName: val } : tx));
+                                }}
+                                className="w-full text-xs p-1.5 border border-zinc-200 bg-white outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Владелец (Юрлицо)</label>
+                              <select
+                                value={acc.parentEntity}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setImportNewAccounts(prev => prev.map((a, i) => i === index ? { ...a, parentEntity: val } : a));
+                                }}
+                                className="w-full text-xs p-1.5 border border-zinc-200 bg-white outline-none"
+                              >
+                                {legalEntities.map(l => <option key={l.id} value={l.code}>{l.label}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Валюта</label>
+                              <select
+                                value={acc.currency}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setImportNewAccounts(prev => prev.map((a, i) => i === index ? { ...a, currency: val } : a));
+                                }}
+                                className="w-full text-xs p-1.5 border border-zinc-200 bg-white outline-none"
+                              >
+                                <option value="₸">₸ (KZT)</option>
+                                <option value="$">$ (USD)</option>
+                                <option value="€">€ (EUR)</option>
+                                <option value="₽">₽ (RUB)</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Нач. баланс</label>
+                              <input
+                                type="number"
+                                value={acc.balance}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  setImportNewAccounts(prev => prev.map((a, i) => i === index ? { ...a, balance: val, initialBalance: val } : a));
+                                }}
+                                className="w-full text-xs p-1.5 border border-zinc-200 bg-white outline-none"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-              {/* Interactive upload trigger */}
-              <div 
-                onClick={() => {
-                  alert('Демонстрационный режим: Пример банковской выписки загружен! Измените фильтры для просмотра импортированных транзакций Каспи.');
-                  setIsImportOpen(false);
-                }}
-                className="border-2 border-dashed border-zinc-200 hover:border-zinc-800 hover:bg-zinc-50 cursor-pointer p-8 rounded-none text-center space-y-2 select-none group transition-all"
-              >
-                <div className="h-10 w-10 bg-zinc-100 group-hover:bg-zinc-200 text-zinc-500 group-hover:text-zinc-900 rounded-none flex items-center justify-center mx-auto transition-colors">
-                  <Upload size={15} />
+                {/* 2. TRANSACTIONS PREVIEW LIST */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b border-zinc-200 pb-1.5">
+                    <span className="font-bold text-xs uppercase tracking-wider text-zinc-700">Транзакции к импорту ({importTransactions.length}):</span>
+                    <span className="text-[10px] text-zinc-400">Проверьте корректность статей доходов/расходов и проектов</span>
+                  </div>
+                  <div className="overflow-x-auto border border-zinc-200 max-h-72 overflow-y-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-zinc-50 text-[9px] font-bold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 sticky top-0 z-10">
+                          <th className="p-2.5">Дата</th>
+                          <th className="p-2.5">Счет</th>
+                          <th className="p-2.5">Тип</th>
+                          <th className="p-2.5">Контрагент</th>
+                          <th className="p-2.5">Назначение платежа</th>
+                          <th className="p-2.5">Статья</th>
+                          <th className="p-2.5">Проект</th>
+                          <th className="p-2.5 text-right">Сумма</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-200 text-[11px] text-zinc-650 bg-white">
+                        {importTransactions.map((tx, index) => {
+                          const isInc = tx.type === 'income';
+                          return (
+                            <tr key={tx.id} className="hover:bg-zinc-50/50">
+                              <td className="p-2.5 font-mono text-[10px] whitespace-nowrap">{tx.date}</td>
+                              <td className="p-2.5 font-medium text-zinc-800 whitespace-nowrap">{tx.accountName}</td>
+                              <td className="p-2.5">
+                                <span className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider border ${
+                                  isInc ? 'bg-emerald-50 border-emerald-250 text-emerald-800' : 'bg-red-50 border-red-250 text-red-800'
+                                }`}>
+                                  {isInc ? 'Приход' : 'Расход'}
+                                </span>
+                              </td>
+                              <td className="p-2.5 font-medium text-zinc-900 truncate max-w-[120px]" title={tx.contragent}>{tx.contragent}</td>
+                              <td className="p-2.5 text-zinc-400 truncate max-w-[180px]" title={tx.notes}>{tx.notes}</td>
+                              <td className="p-2">
+                                <select
+                                  value={tx.article}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setImportTransactions(prev => prev.map((t, i) => i === index ? { ...t, article: val } : t));
+                                  }}
+                                  className="text-[11px] p-1 border border-zinc-200 bg-white outline-none rounded-sm"
+                                >
+                                  {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                  <option value="Прочее">Прочее</option>
+                                </select>
+                              </td>
+                              <td className="p-2">
+                                <select
+                                  value={tx.project}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setImportTransactions(prev => prev.map((t, i) => i === index ? { ...t, project: val } : t));
+                                  }}
+                                  className="text-[11px] p-1 border border-zinc-200 bg-white outline-none rounded-sm"
+                                >
+                                  <option value="Без проекта">Без проекта</option>
+                                  {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                </select>
+                              </td>
+                              <td className={`p-2.5 text-right font-mono font-bold whitespace-nowrap text-xs ${
+                                isInc ? 'text-emerald-600' : 'text-red-600'
+                              }`}>
+                                {isInc ? '+' : '-'}{formatCurrency(tx.amount, '₸')}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-                <div>
-                  <span className="font-bold text-zinc-800 text-xs hover:underline uppercase tracking-wider block">Выбрать файл выписки</span>
-                  <p className="text-[10px] text-zinc-400 mt-1 uppercase tracking-wider">поддерживаются форматы текстовых выписок интернет-банкинга Казахстана</p>
+
+                {/* Actions footer */}
+                <div className="flex gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImportPhase('select');
+                      setImportTransactions([]);
+                      setImportNewAccounts([]);
+                    }}
+                    className="flex-grow bg-zinc-150 hover:bg-zinc-200 text-[11px] font-bold text-zinc-650 uppercase tracking-widest py-3 rounded-none transition-colors cursor-pointer border border-zinc-250 text-zinc-800"
+                  >
+                    Назад
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmImport}
+                    className="flex-[2] bg-zinc-900 hover:bg-zinc-800 text-[11px] font-bold text-white uppercase tracking-widest py-3 rounded-none transition-colors cursor-pointer"
+                  >
+                    Завершить импорт ({importTransactions.length} платежей)
+                  </button>
                 </div>
-              </div>
 
-              {/* Status footer warnings */}
-              <div className="p-4 bg-zinc-50 rounded-none border border-zinc-200 text-[10px] text-zinc-500 leading-normal space-y-1">
-                <span className="font-bold text-zinc-700 block uppercase tracking-wider">Интеллектуальное сопоставление ПланФакта</span>
-                <p>Наша система автоматически сопоставит плательщика с базой контрагентов и назначит статьи доходов/расходов по ключевым фразам!</p>
               </div>
+            )}
 
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsImportOpen(false)}
-                  className="flex-1 bg-zinc-100 hover:bg-zinc-200 text-[11px] font-bold text-zinc-650 uppercase tracking-widest py-3 rounded-none transition-colors"
-                >
-                  Отмена
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    alert('Шаблон импортирован!');
-                    setIsImportOpen(false);
-                  }}
-                  className="flex-1 bg-zinc-900 hover:bg-zinc-850 text-[11px] font-bold text-white uppercase tracking-widest py-3 rounded-none transition-colors"
-                >
-                  Продолжать импорт
-                </button>
-              </div>
-
-            </div>
           </div>
         </div>
       )}
