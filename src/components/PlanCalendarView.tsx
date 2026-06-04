@@ -65,7 +65,14 @@ export default function PlanCalendarView({ transactions, subAccounts, categories
              if (tx.splits && tx.splits.length > 0) {
                  tx.splits.forEach(split => {
                      if (selectedProject === 'ALL' || split.project === selectedProject) {
-                         const catId = categoryNameToId[split.article];
+                         let catId = categoryNameToId[split.article];
+                         if (!catId) {
+                             if (tx.type === 'income') {
+                                 catId = 'unassigned_income';
+                             } else if (tx.type === 'expense') {
+                                 catId = 'unassigned_expense';
+                             }
+                         }
                          if (catId) {
                              const amt = data[monthKey][catId] || 0;
                              data[monthKey][catId] = amt + Math.abs(split.amount);
@@ -74,7 +81,14 @@ export default function PlanCalendarView({ transactions, subAccounts, categories
                  });
              } else {
                  if (selectedProject === 'ALL' || tx.project === selectedProject) {
-                     const catId = categoryNameToId[tx.article];
+                     let catId = categoryNameToId[tx.article];
+                     if (!catId) {
+                         if (tx.type === 'income') {
+                             catId = 'unassigned_income';
+                         } else if (tx.type === 'expense') {
+                             catId = 'unassigned_expense';
+                         }
+                     }
                      if (catId) {
                          const amt = data[monthKey][catId] || 0;
                          data[monthKey][catId] = amt + Math.abs(tx.amount);
@@ -152,6 +166,16 @@ export default function PlanCalendarView({ transactions, subAccounts, categories
           }
       });
 
+      // Append virtual "Без статьи" nodes
+      op_in_children.push({
+          id: 'unassigned_income',
+          label: 'Без статьи'
+      });
+      op_out_children.push({
+          id: 'unassigned_expense',
+          label: 'Без статьи'
+      });
+
       return [
         { id: 'op', label: 'Операционный поток', children: [
             { id: 'op_in', label: 'Поступления', children: op_in_children },
@@ -224,37 +248,89 @@ export default function PlanCalendarView({ transactions, subAccounts, categories
   const renderRow = (node: any, level: number) => {
     const isExpanded = expandedNodes[node.id];
     const hasChildren = node.children && node.children.length > 0;
-    const isInputNode = !hasChildren && !['op', 'inv', 'fin', 'trans'].includes(node.id);
     
+    // Choose classes based on hierarchy level and ID
+    let rowClass = "border-b border-zinc-200 transition-colors group ";
+    let stickyCellClass = "p-3 sticky left-0 z-10 w-64 shadow-[1px_0_0_0_#e4e4e7] ";
+    let textClass = "flex items-center text-xs ";
+
+    if (level === 0) {
+      rowClass += "bg-zinc-100/90 font-bold border-t border-zinc-200 hover:bg-zinc-200/50";
+      stickyCellClass += "bg-zinc-100/90 group-hover:bg-zinc-200/50";
+      textClass += "text-zinc-900 uppercase tracking-wider text-[10px] py-0.5";
+    } else if (node.id === 'op_in') {
+      rowClass += "bg-teal-50/20 hover:bg-teal-50/45 font-semibold";
+      stickyCellClass += "bg-teal-50/20 group-hover:bg-teal-50/45";
+      textClass += "text-teal-850 uppercase tracking-wider text-[10px]";
+    } else if (node.id === 'op_out') {
+      rowClass += "bg-rose-50/20 hover:bg-rose-50/45 font-semibold";
+      stickyCellClass += "bg-rose-50/20 group-hover:bg-rose-50/45";
+      textClass += "text-rose-850 uppercase tracking-wider text-[10px]";
+    } else if (node.id === 'unassigned_income' || node.id === 'unassigned_expense') {
+      rowClass += "bg-white hover:bg-zinc-50/60";
+      stickyCellClass += "bg-white group-hover:bg-zinc-50/60";
+      textClass += "text-zinc-500 font-normal italic";
+    } else if (level === 2) {
+      rowClass += "bg-white hover:bg-zinc-50/80";
+      stickyCellClass += "bg-white group-hover:bg-zinc-50/80";
+      textClass += "text-zinc-800 font-medium";
+    } else {
+      rowClass += "bg-zinc-50/5 hover:bg-zinc-50/60";
+      stickyCellClass += "bg-zinc-50/5 group-hover:bg-zinc-50/60";
+      textClass += "text-zinc-500 font-normal";
+    }
+
     return (
       <React.Fragment key={node.id}>
-        <tr className="border-b border-zinc-200 hover:bg-zinc-50 transition-colors group">
-          <td className="p-3 bg-white sticky left-0 z-10 w-64 shadow-[1px_0_0_0_#e4e4e7] group-hover:bg-zinc-50">
+        <tr className={rowClass}>
+          <td className={stickyCellClass}>
             <div 
-              className={`flex items-center text-xs text-zinc-800 ${hasChildren ? 'font-medium' : ''}`} 
+              className={textClass} 
               style={{ paddingLeft: `${level * 16}px` }}
             >
               {hasChildren ? (
-                <button onClick={() => toggleNode(node.id)} className="mr-2 text-zinc-400 hover:text-zinc-700">
+                <button onClick={() => toggleNode(node.id)} className="mr-2 text-zinc-400 hover:text-zinc-700 shrink-0">
                   {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 </button>
               ) : (
-                <span className="w-6 inline-block"></span>
+                <span className="w-6 inline-block shrink-0"></span>
               )}
-              {node.label}
+              {level >= 3 && (
+                <span className="text-zinc-300 mr-1.5 select-none font-normal shrink-0">—</span>
+              )}
+              <span className="truncate">{node.label}</span>
             </div>
           </td>
           {periods.map(p => {
              const factVal = calculateFactTotal(node.id, p.key);
              const planVal = calculatePlanTotal(node.id, p.key);
 
+             let factTextClass = 'text-zinc-400 font-normal';
+             if (factVal !== 0) {
+                 if (level === 0) factTextClass = 'text-zinc-950 font-bold';
+                 else if (node.id === 'op_in') factTextClass = 'text-teal-850 font-bold';
+                 else if (node.id === 'op_out') factTextClass = 'text-rose-850 font-bold';
+                 else if (node.id === 'unassigned_income' || node.id === 'unassigned_expense') factTextClass = 'text-zinc-500 font-normal italic';
+                 else if (level === 2) factTextClass = 'text-zinc-800 font-semibold';
+                 else factTextClass = 'text-zinc-600 font-medium';
+             }
+
+             let planTextClass = 'text-zinc-400 font-normal';
+             if (planVal !== 0) {
+                 if (level === 0) planTextClass = 'text-teal-900 font-bold';
+                 else if (node.id === 'op_in') planTextClass = 'text-teal-950 font-bold';
+                 else if (node.id === 'op_out') planTextClass = 'text-rose-950 font-bold';
+                 else if (level === 2) planTextClass = 'text-teal-700 font-semibold';
+                 else planTextClass = 'text-teal-600 font-medium';
+             }
+
              return (
               <React.Fragment key={p.key}>
-                <td className="p-2 w-28 text-right text-xs font-mono text-zinc-600 border-l border-zinc-200">
-                    <span className="pr-2">{factVal !== 0 ? formatCurrency(factVal, '') : '-'}</span>
+                <td className="p-2 w-28 text-right text-xs font-mono border-l border-zinc-200">
+                    <span className={`pr-2 ${factTextClass}`}>{factVal !== 0 ? formatCurrency(factVal, '') : '-'}</span>
                 </td>
                 <td className="p-2 w-28 text-right text-xs font-mono">
-                    <span className={`pr-3 ${planVal !== 0 ? 'text-teal-700 font-medium' : 'text-zinc-400'}`}>
+                    <span className={`pr-3 ${planTextClass}`}>
                         {planVal !== 0 ? formatCurrency(planVal, '') : '-'}
                     </span>
                 </td>
