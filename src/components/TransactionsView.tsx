@@ -14,7 +14,8 @@ import {
   CheckCircle2,
   Calendar,
   AlertCircle,
-  Download
+  Download,
+  ArrowLeftRight
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Transaction, SubAccount, ArticleCategory, Project, LegalEntity, TransactionSplit } from '../types';
@@ -1972,19 +1973,35 @@ export default function TransactionsView({
                         />
                       </td>
                       <td className="p-3.5 font-mono text-[11px] text-zinc-500 whitespace-nowrap">{tx.date}</td>
-                      <td className="p-3.5 font-medium text-zinc-800 whitespace-nowrap">{tx.accountName}</td>
-                      <td className="p-3.5">
-                        <span className={`px-1.5 py-0.5 rounded-none text-[9px] font-bold uppercase tracking-wider border ${
-                          tx.type === 'income' ? 'bg-zinc-50 border-zinc-250 text-zinc-800' :
-                          tx.type === 'expense' ? 'bg-zinc-50 border-zinc-250 text-zinc-800' :
-                          tx.type === 'transfer' ? 'bg-zinc-50 border-zinc-250 text-zinc-800' : 'bg-zinc-50 border-zinc-250 text-zinc-800'
-                        }`}>
-                          {tx.type === 'income' ? 'Поступление' :
-                           tx.type === 'expense' ? 'Выплата' :
-                           tx.type === 'transfer' ? 'Перемещение' : 'Начисление'}
-                        </span>
+                      <td className="p-3.5 font-medium text-zinc-800 whitespace-nowrap">
+                        {tx.type === 'transfer' ? (
+                          <div className="flex flex-col leading-tight py-0.5">
+                            <span className="font-medium text-zinc-850">{tx.accountName}</span>
+                            <span className="font-normal text-zinc-500 text-[10.5px] mt-0.5">{tx.toAccountName || '—'}</span>
+                          </div>
+                        ) : (
+                          tx.accountName
+                        )}
                       </td>
-                      <td className="p-3.5 font-medium text-zinc-900 max-w-[140px] truncate">{tx.contragent}</td>
+                      <td className="p-3.5">
+                        {tx.type === 'transfer' ? (
+                          <div className="flex justify-center items-center w-full">
+                            <ArrowLeftRight size={13} className="text-zinc-400" />
+                          </div>
+                        ) : (
+                          <span className={`px-1.5 py-0.5 rounded-none text-[9px] font-bold uppercase tracking-wider border ${
+                            tx.type === 'income' ? 'bg-zinc-50 border-zinc-250 text-zinc-800' :
+                            tx.type === 'expense' ? 'bg-zinc-50 border-zinc-250 text-zinc-800' :
+                            'bg-zinc-50 border-zinc-250 text-zinc-800'
+                          }`}>
+                            {tx.type === 'income' ? 'Поступление' :
+                             tx.type === 'expense' ? 'Выплата' : 'Начисление'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3.5 font-medium text-zinc-900 max-w-[140px] truncate">
+                        {tx.type === 'transfer' ? '' : tx.contragent}
+                      </td>
                       <td className="p-3.5 font-medium text-zinc-850 whitespace-nowrap">
                         {tx.splits && tx.splits.length > 0 ? (
                           <div 
@@ -2006,8 +2023,18 @@ export default function TransactionsView({
                           {tx.project}
                         </span>
                       </td>
-                      <td className={`p-3.5 text-right font-mono font-bold whitespace-nowrap text-xs text-zinc-900`}>
-                        {tx.type === 'expense' ? '-' : ''}{formatCurrency(tx.amount, '₸')}
+                      <td className="p-3.5 text-right font-mono font-bold whitespace-nowrap text-xs text-zinc-900">
+                        {tx.type === 'transfer' ? (
+                          <div className="flex flex-col items-end leading-tight py-0.5 font-mono text-[11px]">
+                            <span className="text-zinc-600 font-medium">-{formatCurrency(tx.amount, '₸')}</span>
+                            <span className="text-zinc-650 font-medium mt-0.5">+{formatCurrency(tx.toAmount || tx.amount, '₸')}</span>
+                          </div>
+                        ) : (
+                          <>
+                            {tx.type === 'expense' ? '-' : ''}
+                            {formatCurrency(tx.amount, '₸')}
+                          </>
+                        )}
                       </td>
                       <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
