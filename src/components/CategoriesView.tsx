@@ -84,6 +84,22 @@ export default function CategoriesView({ categories, setCategories }: Categories
     return categories.filter(c => c.type === activeSegment) || [];
   };
 
+  const getPotentialParents = () => {
+    const list: { id: string; name: string; level: number }[] = [];
+    const filtered = categories.filter(c => c.type === newCatType && c.id !== editingCategory?.id);
+    
+    const roots = filtered.filter(c => !c.parentId);
+    roots.forEach(root => {
+      list.push({ id: root.id, name: root.name, level: 1 });
+      
+      const children = filtered.filter(c => c.parentId === root.id);
+      children.forEach(child => {
+        list.push({ id: child.id, name: `— ${child.name}`, level: 2 });
+      });
+    });
+    return list;
+  };
+
   return (
     <div className="space-y-6 max-w-6xl">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white border border-zinc-200 p-8 rounded-none gap-4">
@@ -143,18 +159,39 @@ export default function CategoriesView({ categories, setCategories }: Categories
                 </div>
                 
                 {getFilteredCategories().some(c => c.parentId === parentCat.id) && (
-                  <div className="pl-6 mt-3 space-y-2">
+                  <div className="pl-6 mt-3 space-y-3">
                     {getFilteredCategories().filter(c => c.parentId === parentCat.id).map(childCat => (
-                      <div key={childCat.id} className="flex justify-between items-center p-2.5 border border-zinc-150 bg-zinc-50/50 group">
-                        <span className="text-xs text-zinc-700">{childCat.name}</span>
-                        <div className="flex gap-2">
-                          <button onClick={() => handleOpenEdit(childCat)} className="text-zinc-400 hover:text-zinc-800 transition-colors opacity-0 group-hover:opacity-100">
-                            <Edit2 size={14} />
-                          </button>
-                          <button onClick={() => handleDelete(childCat.id)} className="text-zinc-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
-                            <Trash2 size={14} />
-                          </button>
+                      <div key={childCat.id} className="space-y-2">
+                        <div className="flex justify-between items-center p-2.5 border border-zinc-150 bg-zinc-50/50 group">
+                          <span className="text-xs text-zinc-700">{childCat.name}</span>
+                          <div className="flex gap-2">
+                            <button onClick={() => handleOpenEdit(childCat)} className="text-zinc-400 hover:text-zinc-800 transition-colors opacity-0 group-hover:opacity-100">
+                              <Edit2 size={14} />
+                            </button>
+                            <button onClick={() => handleDelete(childCat.id)} className="text-zinc-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </div>
+                        
+                        {/* Level 3: Sub-subcategories */}
+                        {getFilteredCategories().some(c => c.parentId === childCat.id) && (
+                          <div className="pl-6 space-y-1.5 border-l-2 border-zinc-100">
+                            {getFilteredCategories().filter(c => c.parentId === childCat.id).map(subSubCat => (
+                              <div key={subSubCat.id} className="flex justify-between items-center p-2 border border-zinc-100 bg-white group">
+                                <span className="text-[11px] text-zinc-600 font-mono">• {subSubCat.name}</span>
+                                <div className="flex gap-2">
+                                  <button onClick={() => handleOpenEdit(subSubCat)} className="text-zinc-400 hover:text-zinc-800 transition-colors opacity-0 group-hover:opacity-100">
+                                    <Edit2 size={12} />
+                                  </button>
+                                  <button onClick={() => handleDelete(subSubCat.id)} className="text-zinc-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -343,10 +380,10 @@ export default function CategoriesView({ categories, setCategories }: Categories
                   <select
                     value={newParent}
                     onChange={e => setNewParent(e.target.value)}
-                    className="flex-1 text-xs border border-zinc-300 p-2 outline-none focus:border-teal-600 text-zinc-500"
+                    className="flex-1 text-xs border border-zinc-300 p-2 outline-none focus:border-teal-600 text-zinc-800 bg-white"
                   >
-                    <option value="">Выберите родительскую статью</option>
-                    {categories.filter(c => c.type === newCatType && !c.parentId && c.id !== editingCategory?.id).map(p => (
+                    <option value="">Без родительской статьи (Уровень 1)</option>
+                    {getPotentialParents().map(p => (
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
                   </select>

@@ -249,7 +249,7 @@ export default function TransactionsView({
   const [typeAccrualValue, setTypeAccrualValue] = useState<string>('Начисление');
 
   // Detected metadata
-  const [detectedNewCategories, setDetectedNewCategories] = useState<{ name: string; inferredType: string; isChild: boolean; parentName?: string }[]>([]);
+  const [detectedNewCategories, setDetectedNewCategories] = useState<{ name: string; inferredType: string; isChild: boolean; parentName?: string; level?: number }[]>([]);
   const [detectedNewProjects, setDetectedNewProjects] = useState<string[]>([]);
   const [detectedNewSubAccounts, setDetectedNewSubAccounts] = useState<string[]>([]);
   const [parsedMigrationTxs, setParsedMigrationTxs] = useState<any[]>([]);
@@ -405,11 +405,47 @@ export default function TransactionsView({
     return { count, income, expense, total };
   }, [selectedTxs, transactions, filterArticles, filterProjects]);
 
-  // Filter options list
   const activeProjects = useMemo(() => projects.map(p => p.name), [projects]);
   const allArticles = useMemo(() => {
-    return categories.map(c => c.name);
+    const list: { id: string; name: string; displayName: string; type: string; level: number }[] = [];
+    ['income', 'expense', 'asset', 'liability', 'equity'].forEach(type => {
+      const typeCats = categories.filter(c => c.type === type);
+      const roots = typeCats.filter(c => !c.parentId);
+      roots.forEach(root => {
+        list.push({ id: root.id, name: root.name, displayName: root.name, type, level: 1 });
+        const children = typeCats.filter(c => c.parentId === root.id);
+        children.forEach(child => {
+          list.push({ id: child.id, name: child.name, displayName: `\u00A0\u00A0├─ ${child.name}`, type, level: 2 });
+          const subChildren = typeCats.filter(c => c.parentId === child.id);
+          subChildren.forEach(subChild => {
+            list.push({ id: subChild.id, name: subChild.name, displayName: `\u00A0\u00A0\u00A0\u00A0└─ ${subChild.name}`, type, level: 3 });
+          });
+        });
+      });
+    });
+    return list;
   }, [categories]);
+
+  const projectsByGroup = useMemo(() => {
+    const groups: Record<string, typeof projects> = {};
+    projects.forEach(p => {
+      const gName = p.group || 'Без группы';
+      if (!groups[gName]) groups[gName] = [];
+      groups[gName].push(p);
+    });
+    return groups;
+  }, [projects]);
+
+  const accountsByEntity = useMemo(() => {
+    const entities: Record<string, typeof subAccounts> = {};
+    subAccounts.forEach(sa => {
+      const entName = sa.parentEntity || 'Без компании';
+      if (!entities[entName]) entities[entName] = [];
+      entities[entName].push(sa);
+    });
+    return entities;
+  }, [subAccounts]);
+
   const allContragents = useMemo(() => {
     return Array.from(new Set(transactions.map(t => t.contragent).filter(Boolean)));
   }, [transactions]);
@@ -1748,12 +1784,19 @@ export default function TransactionsView({
               Счет и юрлицо
               {filterAccounts.length > 0 && <span className="text-[10px] font-mono bg-zinc-200 px-1">{filterAccounts.length}</span>}
             </summary>
-            <div className="border border-t-0 border-zinc-200 bg-white p-2 space-y-1 max-h-32 overflow-y-auto">
-              {subAccounts.map(s => (
-                <label key={s.id} className="flex items-center gap-2 text-zinc-700 cursor-pointer text-[10px]">
-                  <input type="checkbox" checked={filterAccounts.includes(s.id)} onChange={() => toggleArrayFilter(setFilterAccounts, s.id)} className="rounded-none w-3 h-3" />
-                  <span className="leading-tight">{s.name} [{s.parentEntity}]</span>
-                </label>
+            <div className="border border-t-0 border-zinc-200 bg-white p-2 space-y-2 max-h-48 overflow-y-auto">
+              {Object.entries(accountsByEntity).map(([entityName, entityAccounts]) => (
+                <div key={entityName} className="space-y-1">
+                  <div className="text-[9px] font-bold text-zinc-450 uppercase tracking-wider mt-1 mb-0.5 px-1">{entityName}</div>
+                  <div className="pl-2 space-y-1 border-l border-zinc-150 ml-1">
+                    {entityAccounts.map(s => (
+                      <label key={s.id} className="flex items-center gap-2 text-zinc-750 cursor-pointer text-[10px]">
+                        <input type="checkbox" checked={filterAccounts.includes(s.id)} onChange={() => toggleArrayFilter(setFilterAccounts, s.id)} className="rounded-none w-3 h-3" />
+                        <span className="leading-tight">{s.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </details>
@@ -1778,11 +1821,17 @@ export default function TransactionsView({
               Учетная статья
               {filterArticles.length > 0 && <span className="text-[10px] font-mono bg-zinc-200 px-1">{filterArticles.length}</span>}
             </summary>
-            <div className="border border-t-0 border-zinc-200 bg-white p-2 space-y-1 max-h-32 overflow-y-auto">
+            <div className="border border-t-0 border-zinc-200 bg-white p-2 space-y-1 max-h-48 overflow-y-auto">
               {allArticles.map(a => (
-                <label key={a} className="flex items-center gap-2 text-zinc-700 cursor-pointer text-[10px]">
-                  <input type="checkbox" checked={filterArticles.includes(a)} onChange={() => toggleArrayFilter(setFilterArticles, a)} className="rounded-none w-3 h-3" />
-                  <span className="leading-tight">{a}</span>
+                <label 
+                  key={a.name} 
+                  className="flex items-center gap-2 text-zinc-750 cursor-pointer text-[10px]"
+                  style={{ paddingLeft: `${(a.level - 1) * 12}px` }}
+                >
+                  <input type="checkbox" checked={filterArticles.includes(a.name)} onChange={() => toggleArrayFilter(setFilterArticles, a.name)} className="rounded-none w-3 h-3" />
+                  <span className={`leading-tight whitespace-pre ${a.level === 1 ? 'font-bold text-zinc-900 font-sans' : 'text-zinc-650'}`}>
+                    {a.name}
+                  </span>
                 </label>
               ))}
             </div>
@@ -1793,12 +1842,19 @@ export default function TransactionsView({
               Проект
               {filterProjects.length > 0 && <span className="text-[10px] font-mono bg-zinc-200 px-1">{filterProjects.length}</span>}
             </summary>
-            <div className="border border-t-0 border-zinc-200 bg-white p-2 space-y-1 max-h-32 overflow-y-auto">
-              {activeProjects.map(p => (
-                <label key={p} className="flex items-center gap-2 text-zinc-700 cursor-pointer text-[10px]">
-                  <input type="checkbox" checked={filterProjects.includes(p)} onChange={() => toggleArrayFilter(setFilterProjects, p)} className="rounded-none w-3 h-3" />
-                  <span className="leading-tight">{p}</span>
-                </label>
+            <div className="border border-t-0 border-zinc-200 bg-white p-2 space-y-2 max-h-48 overflow-y-auto">
+              {Object.entries(projectsByGroup).map(([groupName, groupProjs]) => (
+                <div key={groupName} className="space-y-1">
+                  <div className="text-[9px] font-bold text-zinc-450 uppercase tracking-wider mt-1 mb-0.5 px-1">{groupName}</div>
+                  <div className="pl-2 space-y-1 border-l border-zinc-150 ml-1">
+                    {groupProjs.map(p => (
+                      <label key={p.id} className="flex items-center gap-2 text-zinc-750 cursor-pointer text-[10px]">
+                        <input type="checkbox" checked={filterProjects.includes(p.name)} onChange={() => toggleArrayFilter(setFilterProjects, p.name)} className="rounded-none w-3 h-3" />
+                        <span className="leading-tight">{p.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </details>
@@ -2122,10 +2178,14 @@ export default function TransactionsView({
                         }}
                         className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
                       >
-                        {subAccounts.map((sub) => (
-                          <option key={sub.id} value={sub.id}>
-                            {sub.name} [{sub.parentEntity}] ({sub.balance >= 0 ? '+' : ''}{formatCurrency(sub.balance, '')})
-                          </option>
+                        {Object.entries(accountsByEntity).map(([entityName, entityAccounts]) => (
+                          <optgroup key={entityName} label={entityName}>
+                            {entityAccounts.map(sub => (
+                              <option key={sub.id} value={sub.id}>
+                                {sub.name} ({sub.balance >= 0 ? '+' : ''}{formatCurrency(sub.balance, '')})
+                              </option>
+                            ))}
+                          </optgroup>
                         ))}
                         <option value="CREATE_NEW">+++ Создать счет +++</option>
                       </select>
@@ -2167,7 +2227,8 @@ export default function TransactionsView({
                       onChange={(e) => {
                         setFormHasSplits(e.target.checked);
                         if (e.target.checked && formSplits.length === 0) {
-                          setFormSplits([{ id: `split-${Date.now()}`, amount: Number(formAmount) || 0, article: formArticle, project: formProject, notes: '' }]);
+                          const firstArticle = allArticles.find(a => a.type === formType)?.name || '';
+                          setFormSplits([{ id: `split-${Date.now()}`, amount: Number(formAmount) || 0, article: firstArticle, project: formProject, notes: '' }]);
                         }
                       }}
                       id="create-splits"
@@ -2188,8 +2249,8 @@ export default function TransactionsView({
                           }}
                           className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
                         >
-                          {allArticles.map((art, idx) => (
-                            <option key={idx} value={art}>{art}</option>
+                          {allArticles.filter(art => art.type === (formType === 'income' ? 'income' : 'expense')).map((art, idx) => (
+                            <option key={idx} value={art.name}>{art.displayName}</option>
                           ))}
                           <option value="CREATE_NEW">+++ Создать статью +++</option>
                         </select>
@@ -2205,8 +2266,12 @@ export default function TransactionsView({
                           }}
                           className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
                         >
-                          {activeProjects.map((proj, idx) => (
-                            <option key={idx} value={proj}>{proj}</option>
+                          {Object.entries(projectsByGroup).map(([groupName, groupProjs]) => (
+                            <optgroup key={groupName} label={groupName}>
+                              {groupProjs.map(proj => (
+                                <option key={proj.id} value={proj.name}>{proj.name}</option>
+                              ))}
+                            </optgroup>
                           ))}
                           <option value="CREATE_NEW">+++ Создать проект +++</option>
                         </select>
@@ -2245,9 +2310,11 @@ export default function TransactionsView({
                                 newSplits[idx].article = e.target.value;
                                 setFormSplits(newSplits);
                               }}
-                              className="w-full text-[10px] border border-zinc-200 p-1.5 outline-none focus:border-zinc-800"
+                              className="w-full text-xs border border-zinc-200 p-1.5 outline-none focus:border-zinc-800 bg-white"
                             >
-                              {allArticles.map(a => <option key={a} value={a}>{a}</option>)}
+                              {allArticles.filter(a => a.type === (formType === 'income' ? 'income' : 'expense')).map(a => (
+                                <option key={a.name} value={a.name}>{a.displayName}</option>
+                              ))}
                             </select>
                           </div>
                           <div className="col-span-4">
@@ -2261,7 +2328,13 @@ export default function TransactionsView({
                               }}
                               className="w-full text-[10px] border border-zinc-200 p-1.5 outline-none focus:border-zinc-800"
                             >
-                              {activeProjects.map(p => <option key={p} value={p}>{p}</option>)}
+                              {Object.entries(projectsByGroup).map(([groupName, groupProjs]) => (
+                                <optgroup key={groupName} label={groupName}>
+                                  {groupProjs.map(proj => (
+                                    <option key={proj.id} value={proj.name}>{proj.name}</option>
+                                  ))}
+                                </optgroup>
+                              ))}
                             </select>
                           </div>
                           <div className="col-span-1 flex items-end justify-end pb-1 pb-1">
@@ -2295,7 +2368,8 @@ export default function TransactionsView({
                         onClick={() => {
                           const currentSum = formSplits.reduce((acc, s) => acc + Number(s.amount || 0), 0);
                           const remainder = Math.max(0, Number(formAmount || 0) - currentSum);
-                          setFormSplits([...formSplits, { id: `split-${Date.now()}`, amount: remainder, article: allArticles[0], project: activeProjects[0], notes: '' }]);
+                          const firstArticle = allArticles.filter(a => a.type === (formType === 'income' ? 'income' : 'expense'))[0]?.name || '';
+                          setFormSplits([...formSplits, { id: `split-${Date.now()}`, amount: remainder, article: firstArticle, project: activeProjects[0], notes: '' }]);
                         }}
                         className="w-full py-2 border border-zinc-300 text-xs text-zinc-650 font-bold uppercase tracking-wider hover:bg-zinc-100 transition-colors bg-white mt-2 cursor-pointer"
                       >
@@ -2347,10 +2421,14 @@ export default function TransactionsView({
                           onChange={(e) => setFormAccountId(e.target.value)}
                           className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
                         >
-                          {subAccounts.map((sub) => (
-                            <option key={sub.id} value={sub.id}>
-                              {sub.name} [{sub.parentEntity}] ({formatCurrency(sub.balance, '')})
-                            </option>
+                          {Object.entries(accountsByEntity).map(([entityName, entityAccounts]) => (
+                            <optgroup key={entityName} label={entityName}>
+                              {entityAccounts.map(sub => (
+                                <option key={sub.id} value={sub.id}>
+                                  {sub.name} ({formatCurrency(sub.balance, '')})
+                                </option>
+                              ))}
+                            </optgroup>
                           ))}
                         </select>
                       </div>
@@ -2382,8 +2460,12 @@ export default function TransactionsView({
                         onChange={(e) => setFormProject(e.target.value)}
                         className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
                       >
-                        {projects.map((proj) => (
-                          <option key={proj.id} value={proj.name}>{proj.name}</option>
+                        {Object.entries(projectsByGroup).map(([groupName, groupProjs]) => (
+                          <optgroup key={groupName} label={groupName}>
+                            {groupProjs.map(proj => (
+                              <option key={proj.id} value={proj.name}>{proj.name}</option>
+                            ))}
+                          </optgroup>
                         ))}
                       </select>
                     </div>
@@ -2415,10 +2497,14 @@ export default function TransactionsView({
                           onChange={(e) => setFormToAccountId(e.target.value)}
                           className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
                         >
-                          {subAccounts.map((sub) => (
-                            <option key={sub.id} value={sub.id}>
-                              {sub.name} [{sub.parentEntity}] ({formatCurrency(sub.balance, '')})
-                            </option>
+                          {Object.entries(accountsByEntity).map(([entityName, entityAccounts]) => (
+                            <optgroup key={entityName} label={entityName}>
+                              {entityAccounts.map(sub => (
+                                <option key={sub.id} value={sub.id}>
+                                  {sub.name} ({formatCurrency(sub.balance, '')})
+                                </option>
+                              ))}
+                            </optgroup>
                           ))}
                         </select>
                       </div>
@@ -2509,8 +2595,8 @@ export default function TransactionsView({
                         onChange={(e) => setFormDebitArticle(e.target.value)}
                         className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
                       >
-                        {categories.map((cat) => (
-                          <option key={cat.id} value={cat.name}>{cat.name}</option>
+                        {allArticles.map((art) => (
+                          <option key={art.id} value={art.name}>{art.displayName}</option>
                         ))}
                       </select>
                     </div>
@@ -2538,8 +2624,8 @@ export default function TransactionsView({
                         onChange={(e) => setFormCreditArticle(e.target.value)}
                         className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
                       >
-                        {categories.map((cat) => (
-                          <option key={cat.id} value={cat.name}>{cat.name}</option>
+                        {allArticles.map((art) => (
+                          <option key={art.id} value={art.name}>{art.displayName}</option>
                         ))}
                       </select>
                     </div>
@@ -2712,8 +2798,14 @@ export default function TransactionsView({
                         }}
                         className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
                       >
-                        {subAccounts.map((sub) => (
-                          <option key={sub.id} value={sub.id}>{sub.name} [{sub.parentEntity}]</option>
+                        {Object.entries(accountsByEntity).map(([entityName, entityAccounts]) => (
+                          <optgroup key={entityName} label={entityName}>
+                            {entityAccounts.map(sub => (
+                              <option key={sub.id} value={sub.id}>
+                                {sub.name} ({sub.balance >= 0 ? '+' : ''}{formatCurrency(sub.balance, '')})
+                              </option>
+                            ))}
+                          </optgroup>
                         ))}
                         <option value="CREATE_NEW">+++ Создать счет +++</option>
                       </select>
@@ -2749,7 +2841,8 @@ export default function TransactionsView({
                       onChange={(e) => {
                         setFormHasSplits(e.target.checked);
                         if (e.target.checked && formSplits.length === 0) {
-                          setFormSplits([{ id: `split-${Date.now()}`, amount: Number(formAmount) || 0, article: formArticle, project: formProject, notes: '' }]);
+                          const firstArticle = allArticles.find(a => a.type === formType)?.name || '';
+                          setFormSplits([{ id: `split-${Date.now()}`, amount: Number(formAmount) || 0, article: firstArticle, project: formProject, notes: '' }]);
                         }
                       }}
                       id="edit-splits"
@@ -2770,8 +2863,8 @@ export default function TransactionsView({
                           }}
                           className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
                         >
-                          {allArticles.map((art, idx) => (
-                            <option key={idx} value={art}>{art}</option>
+                          {allArticles.filter(art => art.type === (formType === 'income' ? 'income' : 'expense')).map((art, idx) => (
+                            <option key={idx} value={art.name}>{art.displayName}</option>
                           ))}
                           <option value="CREATE_NEW">+++ Создать статью +++</option>
                         </select>
@@ -2787,8 +2880,12 @@ export default function TransactionsView({
                           }}
                           className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-zinc-50 outline-none focus:bg-white focus:border-zinc-800"
                         >
-                          {activeProjects.map((p, idx) => (
-                            <option key={idx} value={p}>{p}</option>
+                          {Object.entries(projectsByGroup).map(([groupName, groupProjs]) => (
+                            <optgroup key={groupName} label={groupName}>
+                              {groupProjs.map(proj => (
+                                <option key={proj.id} value={proj.name}>{proj.name}</option>
+                              ))}
+                            </optgroup>
                           ))}
                           <option value="CREATE_NEW">+++ Создать проект +++</option>
                         </select>
@@ -2827,9 +2924,11 @@ export default function TransactionsView({
                                 newSplits[idx].article = e.target.value;
                                 setFormSplits(newSplits);
                               }}
-                              className="w-full text-[10px] border border-zinc-200 p-1.5 outline-none focus:border-zinc-800"
+                              className="w-full text-xs border border-zinc-200 p-1.5 outline-none focus:border-zinc-800 bg-white"
                             >
-                              {allArticles.map(a => <option key={a} value={a}>{a}</option>)}
+                              {allArticles.filter(a => a.type === (formType === 'income' ? 'income' : 'expense')).map(a => (
+                                <option key={a.name} value={a.name}>{a.displayName}</option>
+                              ))}
                             </select>
                           </div>
                           <div className="col-span-4">
@@ -2843,10 +2942,16 @@ export default function TransactionsView({
                               }}
                               className="w-full text-[10px] border border-zinc-200 p-1.5 outline-none focus:border-zinc-800"
                             >
-                              {activeProjects.map(p => <option key={p} value={p}>{p}</option>)}
+                              {Object.entries(projectsByGroup).map(([groupName, groupProjs]) => (
+                                <optgroup key={groupName} label={groupName}>
+                                  {groupProjs.map(proj => (
+                                    <option key={proj.id} value={proj.name}>{proj.name}</option>
+                                  ))}
+                                </optgroup>
+                              ))}
                             </select>
                           </div>
-                          <div className="col-span-1 flex items-end justify-end pb-1 pb-1">
+                          <div className="col-span-1 flex items-end justify-end pb-1">
                             <button 
                               type="button" 
                               onClick={() => {
@@ -2877,7 +2982,8 @@ export default function TransactionsView({
                         onClick={() => {
                           const currentSum = formSplits.reduce((acc, s) => acc + Number(s.amount || 0), 0);
                           const remainder = Math.max(0, Number(formAmount || 0) - currentSum);
-                          setFormSplits([...formSplits, { id: `split-${Date.now()}`, amount: remainder, article: allArticles[0], project: activeProjects[0], notes: '' }]);
+                          const firstArticle = allArticles.filter(a => a.type === (formType === 'income' ? 'income' : 'expense'))[0]?.name || '';
+                          setFormSplits([...formSplits, { id: `split-${Date.now()}`, amount: remainder, article: firstArticle, project: activeProjects[0], notes: '' }]);
                         }}
                         className="w-full py-2 border border-zinc-300 text-xs text-zinc-600 font-bold uppercase tracking-wider hover:bg-zinc-100 transition-colors bg-white mt-2 cursor-pointer"
                       >
@@ -2929,10 +3035,14 @@ export default function TransactionsView({
                           onChange={(e) => setFormAccountId(e.target.value)}
                           className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
                         >
-                          {subAccounts.map((sub) => (
-                            <option key={sub.id} value={sub.id}>
-                              {sub.name} [{sub.parentEntity}] ({formatCurrency(sub.balance, '')})
-                            </option>
+                          {Object.entries(accountsByEntity).map(([entityName, entityAccounts]) => (
+                            <optgroup key={entityName} label={entityName}>
+                              {entityAccounts.map(sub => (
+                                <option key={sub.id} value={sub.id}>
+                                  {sub.name} ({formatCurrency(sub.balance, '')})
+                                </option>
+                              ))}
+                            </optgroup>
                           ))}
                         </select>
                       </div>
@@ -2964,8 +3074,12 @@ export default function TransactionsView({
                         onChange={(e) => setFormProject(e.target.value)}
                         className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
                       >
-                        {projects.map((proj) => (
-                          <option key={proj.id} value={proj.name}>{proj.name}</option>
+                        {Object.entries(projectsByGroup).map(([groupName, groupProjs]) => (
+                          <optgroup key={groupName} label={groupName}>
+                            {groupProjs.map(proj => (
+                              <option key={proj.id} value={proj.name}>{proj.name}</option>
+                            ))}
+                          </optgroup>
                         ))}
                       </select>
                     </div>
@@ -2997,10 +3111,14 @@ export default function TransactionsView({
                           onChange={(e) => setFormToAccountId(e.target.value)}
                           className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
                         >
-                          {subAccounts.map((sub) => (
-                            <option key={sub.id} value={sub.id}>
-                              {sub.name} [{sub.parentEntity}] ({formatCurrency(sub.balance, '')})
-                            </option>
+                          {Object.entries(accountsByEntity).map(([entityName, entityAccounts]) => (
+                            <optgroup key={entityName} label={entityName}>
+                              {entityAccounts.map(sub => (
+                                <option key={sub.id} value={sub.id}>
+                                  {sub.name} ({formatCurrency(sub.balance, '')})
+                                </option>
+                              ))}
+                            </optgroup>
                           ))}
                         </select>
                       </div>
@@ -3091,8 +3209,8 @@ export default function TransactionsView({
                         onChange={(e) => setFormDebitArticle(e.target.value)}
                         className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-855 bg-white outline-none focus:border-zinc-800"
                       >
-                        {categories.map((cat) => (
-                          <option key={cat.id} value={cat.name}>{cat.name}</option>
+                        {allArticles.map((art) => (
+                          <option key={art.id} value={art.name}>{art.displayName}</option>
                         ))}
                       </select>
                     </div>
@@ -3120,8 +3238,8 @@ export default function TransactionsView({
                         onChange={(e) => setFormCreditArticle(e.target.value)}
                         className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
                       >
-                        {categories.map((cat) => (
-                          <option key={cat.id} value={cat.name}>{cat.name}</option>
+                        {allArticles.map((art) => (
+                          <option key={art.id} value={art.name}>{art.displayName}</option>
                         ))}
                       </select>
                     </div>
@@ -3259,8 +3377,14 @@ export default function TransactionsView({
                       className="flex-1 text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
                     >
                       <option value="">Оставить как есть</option>
-                      {subAccounts.map((sub) => (
-                        <option key={sub.id} value={sub.id}>{sub.name} [{sub.parentEntity}] ({formatCurrency(sub.balance, '')})</option>
+                      {Object.entries(accountsByEntity).map(([entityName, entityAccounts]) => (
+                        <optgroup key={entityName} label={entityName}>
+                          {entityAccounts.map(sub => (
+                            <option key={sub.id} value={sub.id}>
+                              {sub.name} ({formatCurrency(sub.balance, '')})
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
                     </select>
                     {bulkAccountId && (
@@ -3362,8 +3486,8 @@ export default function TransactionsView({
                       className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
                     >
                       <option value="">Оставить как есть</option>
-                      {categories.map((cat) => (
-                        <option key={cat.id} value={cat.name}>{cat.name}</option>
+                      {allArticles.map((art) => (
+                        <option key={art.id} value={art.name}>{art.displayName}</option>
                       ))}
                     </select>
                   </div>
@@ -3375,8 +3499,8 @@ export default function TransactionsView({
                       className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
                     >
                       <option value="">Оставить как есть</option>
-                      {categories.map((cat) => (
-                        <option key={cat.id} value={cat.name}>{cat.name}</option>
+                      {allArticles.map((art) => (
+                        <option key={art.id} value={art.name}>{art.displayName}</option>
                       ))}
                     </select>
                   </div>
@@ -3392,8 +3516,14 @@ export default function TransactionsView({
                       className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
                     >
                       <option value="">Оставить как есть</option>
-                      {subAccounts.map((sub) => (
-                        <option key={sub.id} value={sub.id}>{sub.name} [{sub.parentEntity}]</option>
+                      {Object.entries(accountsByEntity).map(([entityName, entityAccounts]) => (
+                        <optgroup key={entityName} label={entityName}>
+                          {entityAccounts.map(sub => (
+                            <option key={sub.id} value={sub.id}>
+                              {sub.name}
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
                     </select>
                   </div>
@@ -3432,7 +3562,7 @@ export default function TransactionsView({
                   >
                     <option value="">Оставить как есть</option>
                     {allArticles.map((art, idx) => (
-                      <option key={idx} value={art}>{art}</option>
+                      <option key={idx} value={art.name}>{art.displayName}</option>
                     ))}
                   </select>
                 </div>
@@ -3445,8 +3575,12 @@ export default function TransactionsView({
                     className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-850 bg-white outline-none focus:border-zinc-800"
                   >
                     <option value="">Оставить как есть</option>
-                    {activeProjects.map((p, idx) => (
-                      <option key={idx} value={p}>{p}</option>
+                    {Object.entries(projectsByGroup).map(([groupName, groupProjs]) => (
+                      <optgroup key={groupName} label={groupName}>
+                        {groupProjs.map(proj => (
+                          <option key={proj.id} value={proj.name}>{proj.name}</option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                 </div>
@@ -3996,7 +4130,9 @@ export default function TransactionsView({
                                       }}
                                       className="text-[11px] p-1 border border-zinc-200 bg-white outline-none rounded-sm"
                                     >
-                                      {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                      {allArticles.map(art => (
+                                        <option key={art.id} value={art.name}>{art.displayName}</option>
+                                      ))}
                                       <option value="Прочее">Прочее</option>
                                     </select>
                                   </td>
@@ -4010,7 +4146,13 @@ export default function TransactionsView({
                                       className="text-[11px] p-1 border border-zinc-200 bg-white outline-none rounded-sm"
                                     >
                                       <option value="Без проекта">Без проекта</option>
-                                      {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                      {Object.entries(projectsByGroup).map(([groupName, groupProjs]) => (
+                                        <optgroup key={groupName} label={groupName}>
+                                          {groupProjs.map(p => (
+                                            <option key={p.id} value={p.name}>{p.name}</option>
+                                          ))}
+                                        </optgroup>
+                                      ))}
                                     </select>
                                   </td>
                                   <td className={`p-2.5 text-right font-mono font-bold whitespace-nowrap text-xs ${
@@ -4259,9 +4401,22 @@ export default function TransactionsView({
                 <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Вложить в статью (Субстатья)</label>
                 <select value={createArticleData.parentId} onChange={(e) => setCreateArticleData({...createArticleData, parentId: e.target.value})} className="w-full text-xs border border-zinc-200 p-2 outline-none focus:border-zinc-800 focus:bg-white bg-zinc-50 text-zinc-800">
                   <option value="">Выберите родительскую статью</option>
-                  {categories.filter(c => !c.parentId && c.type === (createArticleData.type || (formType === 'income' ? 'income' : 'expense'))).map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
+                  {(() => {
+                    const type = createArticleData.type || (formType === 'income' ? 'income' : 'expense');
+                    const list: { id: string; name: string }[] = [];
+                    const filtered = categories.filter(c => c.type === type);
+                    const roots = filtered.filter(c => !c.parentId);
+                    roots.forEach(root => {
+                      list.push({ id: root.id, name: root.name });
+                      const children = filtered.filter(c => c.parentId === root.id);
+                      children.forEach(child => {
+                        list.push({ id: child.id, name: `\u00A0\u00A0├─ ${child.name}` });
+                      });
+                    });
+                    return list.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ));
+                  })()}
                 </select>
               </div>
               <button className="w-full py-2 bg-teal-600 hover:bg-teal-700 transition-colors text-white font-bold text-[10px] uppercase">Сохранить</button>
