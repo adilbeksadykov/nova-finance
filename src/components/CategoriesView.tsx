@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, MoreVertical, Edit2, Trash2 } from 'lucide-react';
+import { Edit2, Trash2 } from 'lucide-react';
 import { ArticleCategory } from '../types';
 
 interface CategoriesViewProps {

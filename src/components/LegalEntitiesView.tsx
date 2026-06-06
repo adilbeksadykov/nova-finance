@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Edit2, Search, Check, X } from 'lucide-react';
+import { Trash2, Edit2, Search, Check, X } from 'lucide-react';
 import { LegalEntity } from '../types';
 
 interface LegalEntitiesViewProps {

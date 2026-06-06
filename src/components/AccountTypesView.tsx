@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Edit2, Search, Check } from 'lucide-react';
+import { Trash2, Edit2, Search } from 'lucide-react';
 
 interface AccountTypesViewProps {
   types: string[];

@@ -39,6 +39,8 @@ export interface Transaction {
   toAccountName?: string;
   toAmount?: number;
   toDate?: string;
+  toAccountOriginalName?: string;
+  accountOriginalName?: string;
 
   // Accrual fields
   legalEntity?: string;

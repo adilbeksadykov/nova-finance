@@ -1,12 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { ChevronDown, ChevronRight, Download, MoreHorizontal, Upload } from 'lucide-react';
-import { ArticleCategory, Project, Transaction } from '../types';
+import { ArticleCategory, Project } from '../types';
 import { formatCurrency } from '../utils';
 
 interface PlanBDRViewProps {
   categories: ArticleCategory[];
   projects: Project[];
-  transactions: Transaction[];
   budgets: Record<string, Record<string, Record<string, number>>>;
   setBudgets: React.Dispatch<React.SetStateAction<Record<string, Record<string, Record<string, number>>>>>;
 }
@@ -24,7 +23,7 @@ const formatDisplayMonth = (date: Date) => {
     return `${m} '${y}`;
 }
 
-export default function PlanBDRView({ categories, projects, transactions, budgets, setBudgets }: PlanBDRViewProps) {
+export default function PlanBDRView({ categories, projects, budgets, setBudgets }: PlanBDRViewProps) {
   const [selectedProject, setSelectedProject] = useState('ALL');
 
   const baseDate = new Date('2026-01-01');

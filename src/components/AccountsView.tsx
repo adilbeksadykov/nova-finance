@@ -10,9 +10,7 @@ import {
   CreditCard, 
   Smartphone, 
   Wallet,
-  Globe,
   Search,
-  Check,
   X
 } from 'lucide-react';
 import { SubAccount, LegalEntity } from '../types';
@@ -141,10 +139,10 @@ export default function AccountsView({ subAccounts, setSubAccounts, legalEntitie
   // Helper to render Account type badges
   const renderTypeIcon = (t: string) => {
     switch (t) {
-      case 'cash': return <Coins size={14} className="text-amber-500" title="Наличные" />;
-      case 'card': return <CreditCard size={14} className="text-teal-500" title="Карта физлица" />;
-      case 'electronic': return <Smartphone size={14} className="text-indigo-500" title="Электронный" />;
-      default: return <Wallet size={14} className="text-blue-500" title="Безналичный/Расчетный счет" />;
+      case 'cash': return <span title="Наличные"><Coins size={14} className="text-amber-500" /></span>;
+      case 'card': return <span title="Карта физлица"><CreditCard size={14} className="text-teal-500" /></span>;
+      case 'electronic': return <span title="Электронный"><Smartphone size={14} className="text-indigo-500" /></span>;
+      default: return <span title="Безналичный/Расчетный счет"><Wallet size={14} className="text-blue-500" /></span>;
     }
   };
 

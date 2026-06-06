@@ -64,7 +64,7 @@ export default function UsersView({ users, setUsers }: UsersViewProps) {
     setPosition('');
   };
 
-  const handleDeleteUser = (id: string, userMail: string) => {
+  const handleDeleteUser = (id: string) => {
     // Direct deletion since window.confirm is blocked in iframes
     setUsers(prev => prev.filter(u => u.id !== id));
   };
@@ -222,7 +222,7 @@ export default function UsersView({ users, setUsers }: UsersViewProps) {
                         </button>
                         {u.role !== 'Owner' && (
                           <button
-                            onClick={() => handleDeleteUser(u.id, u.email)}
+                            onClick={() => handleDeleteUser(u.id)}
                             className="text-zinc-400 hover:text-zinc-950 p-1 rounded-none transition-colors"
                             title="Отрезать доступ"
                           >

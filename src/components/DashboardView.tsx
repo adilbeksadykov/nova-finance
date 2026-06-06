@@ -1,15 +1,11 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { 
   TrendingUp, 
   TrendingDown, 
   DollarSign, 
   Percent, 
   Layers, 
-  ChevronRight, 
-  Calendar,
-  Filter,
-  CheckCircle2,
-  AlertTriangle
+  Filter
 } from 'lucide-react';
 import { Transaction, Project } from '../types';
 import { formatCurrency } from '../utils';
@@ -24,7 +20,6 @@ interface DashboardViewProps {
 export default function DashboardView({ transactions, selectedProject, setSelectedProject, projects }: DashboardViewProps) {
   const [calculationMethod, setCalculationMethod] = useState<'accrual' | 'cash'>('accrual');
   const [cashFlowTab, setCashFlowTab] = useState<'all' | 'operating' | 'investment' | 'financial'>('all');
-  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
   // Filtered transactions by project if any
   const filteredTxs = useMemo(() => {
@@ -32,9 +27,7 @@ export default function DashboardView({ transactions, selectedProject, setSelect
     return transactions.filter(t => t.project.toLowerCase() === selectedProject.toLowerCase());
   }, [transactions, selectedProject]);
 
-  // Months listing
-  const monthsList = ['авг', 'сен', 'окт', 'ноя', 'дек', 'янв', 'фев', 'мар'];
-  
+
   // Custom calculated financial data from filteredTxs
   const financialData = useMemo(() => {
     let incomes = 0;

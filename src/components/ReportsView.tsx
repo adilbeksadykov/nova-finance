@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { 
   FileSpreadsheet, 
   Download, 
@@ -200,7 +200,7 @@ export default function ReportsView({ transactions }: ReportsViewProps) {
       }
     });
 
-    timelineMonths.forEach((m, idx) => {
+    timelineMonths.forEach((_, idx) => {
       // In real life we'd calculate state AT the month
       cash[idx] = runningCash;
       capital[idx] = runningCash; // Simplified balancing

@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { Plus, Search, MoreVertical, Edit2, Trash2, ChevronDown, ChevronRight, ArrowLeft, BarChart3, AlertCircle, Calendar, MessageSquare, Briefcase, FileText, CheckCircle2, Clock } from 'lucide-react';
+import { Search, Edit2, Trash2, ChevronDown, ChevronRight, BarChart3, AlertCircle, Calendar, Briefcase, FileText, CheckCircle2, Clock } from 'lucide-react';
 import { Project, Transaction, ProjectGroup } from '../types';
 import { formatCurrency } from '../utils';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
+import { XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
 
 interface ProjectsViewProps {
   projects: Project[];
@@ -149,7 +149,7 @@ export default function ProjectsView({ projects, setProjects, projectGroups, set
       }
     });
 
-    return Object.values(monthlyData).sort((a, b) => 0); // No real sort for now
+    return Object.values(monthlyData);
   }, [selectedProjTransactions, selectedProject]);
 
   // Handle Operations

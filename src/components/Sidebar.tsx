@@ -1,26 +1,18 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { 
   BarChart3, 
   RefreshCw, 
   Briefcase, 
-  TrendingUp, 
   FileText, 
   FolderTree, 
-  Users, 
   Settings, 
-  Wallet,
-  Menu,
-  ChevronDown,
   Bell,
   MoreHorizontal
 } from 'lucide-react';
-import { formatCurrency } from '../utils';
 
 interface SidebarProps {
   currentTab: string;
   setCurrentTab: (tab: string) => void;
-  totalBalance: number;
-  onBalanceClick: () => void;
   userEmail: string;
   onLogout: () => void;
 }
@@ -28,8 +20,6 @@ interface SidebarProps {
 export default function Sidebar({ 
   currentTab, 
   setCurrentTab, 
-  totalBalance, 
-  onBalanceClick,
   userEmail,
   onLogout
 }: SidebarProps) {

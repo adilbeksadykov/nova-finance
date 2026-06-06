@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import DashboardView from './components/DashboardView';
 import TransactionsView from './components/TransactionsView';
@@ -26,7 +26,7 @@ import {
 } from './utils';
 
 import { SubAccount, Transaction, TeamUser, ArticleCategory, ExchangeRate, Project, LegalEntity, ProjectGroup } from './types';
-import { HelpCircle, ChevronDown, Check, Info, FileText, Loader } from 'lucide-react';
+import { Loader } from 'lucide-react';
 
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -249,7 +249,6 @@ export default function App() {
           <PlanBDRView 
             categories={categories}
             projects={projects}
-            transactions={transactions}
             budgets={budgets}
             setBudgets={setBudgets}
           />
@@ -262,7 +261,6 @@ export default function App() {
             categories={categories}
             projects={projects}
             budgets={budgets}
-            setBudgets={setBudgets}
           />
         );
       case 'projects':
@@ -374,8 +372,6 @@ export default function App() {
       <Sidebar 
         currentTab={currentTab} 
         setCurrentTab={setCurrentTab}
-        totalBalance={netCorporateBalance}
-        onBalanceClick={() => setIsBalancePopoverOpen(!isBalancePopoverOpen)}
         userEmail={currentUser.email || "User"}
         onLogout={() => signOut(auth)}
       />

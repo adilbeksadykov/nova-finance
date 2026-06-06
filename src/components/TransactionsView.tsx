@@ -3,8 +3,6 @@ import {
   Search, 
   Plus, 
   Upload, 
-  Check, 
-  Clock, 
   X, 
   Edit3, 
   Trash2, 
@@ -12,7 +10,6 @@ import {
   FileSpreadsheet, 
   Paperclip,
   CheckCircle2,
-  Calendar,
   AlertCircle,
   Download
 } from 'lucide-react';
@@ -1958,7 +1955,6 @@ export default function TransactionsView({
                 </tr>
               ) : (
                 filteredTxs.map((tx) => {
-                  const isInc = tx.type === 'income';
                   return (
                     <React.Fragment key={tx.id}>
                     <tr 

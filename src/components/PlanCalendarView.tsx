@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Download, MoreHorizontal, AlertCircle } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { ChevronDown, ChevronRight, MoreHorizontal, AlertCircle } from 'lucide-react';
 import { Transaction, SubAccount, ArticleCategory, Project } from '../types';
 import { formatCurrency } from '../utils';
 
@@ -9,7 +9,6 @@ interface PlanCalendarViewProps {
   categories: ArticleCategory[];
   projects: Project[];
   budgets: Record<string, Record<string, Record<string, number>>>;
-  setBudgets: React.Dispatch<React.SetStateAction<Record<string, Record<string, Record<string, number>>>>>;
 }
 
 const addMonths = (date: Date, months: number) => {
@@ -26,7 +25,7 @@ const formatDisplayMonth = (date: Date) => {
     return `${m.charAt(0).toUpperCase() + m.slice(1)} '${y}`;
 }
 
-export default function PlanCalendarView({ transactions, subAccounts, categories, projects, budgets, setBudgets }: PlanCalendarViewProps) {
+export default function PlanCalendarView({ transactions, subAccounts, categories, projects, budgets }: PlanCalendarViewProps) {
   const [selectedProject, setSelectedProject] = useState('ALL');
 
   const baseDateStr = '2026-05-01'; // align to month start
