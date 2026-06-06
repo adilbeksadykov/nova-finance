@@ -14,8 +14,7 @@ import {
   CheckCircle2,
   Calendar,
   AlertCircle,
-  Download,
-  ArrowLeftRight
+  Download
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Transaction, SubAccount, ArticleCategory, Project, LegalEntity, TransactionSplit } from '../types';
@@ -1254,7 +1253,7 @@ export default function TransactionsView({
       const rawToAmount = columnMapping.toAmount ? row[columnMapping.toAmount] : '';
       const toAccountName = String(rawToAccount).trim();
 
-      if (txType === 'transfer' && toAccountName && toAccountName !== accountName) {
+      if (txType === 'transfer' && toAccountName) {
         const toAccountExists = subAccounts.some(s => s.name.toLowerCase() === toAccountName.toLowerCase() || s.id === toAccountName);
         if (!toAccountExists) {
           newSubAccountsSet.add(toAccountName);
@@ -1265,7 +1264,7 @@ export default function TransactionsView({
       if (rawToAmount) {
         const parsedToAmt = typeof rawToAmount === 'number' ? rawToAmount : parseFloat(String(rawToAmount).replace(/\s/g, '').replace(/,/g, '.'));
         if (!isNaN(parsedToAmt)) {
-          toAmt = Math.abs(parsedToAmt);
+          toAmt = parsedToAmt;
         }
       }
 
@@ -1287,7 +1286,7 @@ export default function TransactionsView({
 
       // Check if we need to pair this transfer row (two-row transfer representation)
       let paired = false;
-      if (txType === 'transfer' && (!toAccountName || toAccountName === accountName)) {
+      if (txType === 'transfer' && !toAccountName) {
         // Find all matching unpaired transfers
         const candidates = parsedTxs
           .map((ptx, pIdx) => ({ ptx, pIdx }))
@@ -1359,7 +1358,7 @@ export default function TransactionsView({
         legalEntity: String(rawLegalEntity).trim(),
         _originalAmountWasZero: originalAmount === 0,
         _originalRawAmount: originalAmount,
-        _isUnpairedTransfer: txType === 'transfer' && (!toAccountName || toAccountName === accountName),
+        _isUnpairedTransfer: txType === 'transfer' && !toAccountName,
         splits: []
       });
     });
@@ -1500,16 +1499,10 @@ export default function TransactionsView({
 
       if (tx.type === 'transfer') {
         const lowerToAcc = tx.toAccountOriginalName?.toLowerCase() || '';
-        const lowerAcc = tx.accountOriginalName?.toLowerCase() || '';
-        const hasMappedToAcc = lowerToAcc && lowerToAcc !== lowerAcc;
-        
-        toAccountId = hasMappedToAcc
-          ? (accountMapping[lowerToAcc] || subAccounts[1]?.id || subAccounts[0]?.id || '2')
-          : (subAccounts.find(s => s.id !== mappedAccId)?.id || subAccounts[1]?.id || subAccounts[0]?.id || '2');
-
+        toAccountId = accountMapping[lowerToAcc] || subAccounts[1]?.id || subAccounts[0]?.id || '2';
         const toAcc = createdSubAccounts.find(s => s.id === toAccountId) || subAccounts.find(s => s.id === toAccountId);
         toAccountName = toAcc ? toAcc.name : tx.toAccountOriginalName;
-        toAmount = Math.abs(tx.toAmount || tx.amount);
+        toAmount = tx.toAmount || tx.amount;
         toDate = tx.date;
       }
 
@@ -1981,9 +1974,9 @@ export default function TransactionsView({
                       <td className="p-3.5 font-mono text-[11px] text-zinc-500 whitespace-nowrap">{tx.date}</td>
                       <td className="p-3.5 font-medium text-zinc-800 whitespace-nowrap">
                         {tx.type === 'transfer' ? (
-                          <div className="flex flex-col leading-tight py-0.5">
-                            <span className="font-medium text-zinc-850">{tx.accountName}</span>
-                            <span className="font-normal text-zinc-500 text-[10.5px] mt-0.5">{tx.toAccountName || '—'}</span>
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-zinc-800 font-medium">{tx.accountName}</span>
+                            <span className="text-zinc-400 font-medium text-[11px]">{tx.toAccountName || tx.toAccountOriginalName || '—'}</span>
                           </div>
                         ) : (
                           tx.accountName
@@ -1991,23 +1984,18 @@ export default function TransactionsView({
                       </td>
                       <td className="p-3.5">
                         {tx.type === 'transfer' ? (
-                          <div className="flex justify-center items-center w-full">
-                            <ArrowLeftRight size={13} className="text-zinc-400" />
-                          </div>
+                          <div className="flex justify-center text-zinc-400 font-bold text-base select-none">⇄</div>
                         ) : (
                           <span className={`px-1.5 py-0.5 rounded-none text-[9px] font-bold uppercase tracking-wider border ${
                             tx.type === 'income' ? 'bg-zinc-50 border-zinc-250 text-zinc-800' :
-                            tx.type === 'expense' ? 'bg-zinc-50 border-zinc-250 text-zinc-800' :
-                            'bg-zinc-50 border-zinc-250 text-zinc-800'
+                            tx.type === 'expense' ? 'bg-zinc-50 border-zinc-250 text-zinc-800' : 'bg-zinc-50 border-zinc-250 text-zinc-800'
                           }`}>
                             {tx.type === 'income' ? 'Поступление' :
                              tx.type === 'expense' ? 'Выплата' : 'Начисление'}
                           </span>
                         )}
                       </td>
-                      <td className="p-3.5 font-medium text-zinc-900 max-w-[140px] truncate">
-                        {tx.type === 'transfer' ? '' : tx.contragent}
-                      </td>
+                      <td className="p-3.5 font-medium text-zinc-900 max-w-[140px] truncate">{tx.contragent}</td>
                       <td className="p-3.5 font-medium text-zinc-850 whitespace-nowrap">
                         {tx.splits && tx.splits.length > 0 ? (
                           <div 
@@ -2029,11 +2017,11 @@ export default function TransactionsView({
                           {tx.project}
                         </span>
                       </td>
-                      <td className="p-3.5 text-right font-mono font-bold whitespace-nowrap text-xs text-zinc-900">
+                      <td className={`p-3.5 text-right font-mono font-bold whitespace-nowrap text-xs text-zinc-900`}>
                         {tx.type === 'transfer' ? (
-                          <div className="flex flex-col items-end leading-tight py-0.5 font-mono text-[11px]">
-                            <span className="text-zinc-600 font-medium">-{formatCurrency(Math.abs(tx.amount), '₸')}</span>
-                            <span className="text-zinc-650 font-medium mt-0.5">+{formatCurrency(Math.abs(tx.toAmount || tx.amount), '₸')}</span>
+                          <div className="flex flex-col items-end gap-0.5">
+                            <span className="text-zinc-800 font-bold">-{formatCurrency(tx.amount, '₸')}</span>
+                            <span className="text-zinc-400 font-bold text-[11px]">+{formatCurrency(tx.toAmount || tx.amount, '₸')}</span>
                           </div>
                         ) : (
                           <>
