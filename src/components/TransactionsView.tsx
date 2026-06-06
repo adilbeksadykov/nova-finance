@@ -1590,9 +1590,6 @@ export default function TransactionsView({
       createdCategories.push(newCat);
     });
 
-    if (createdSubAccounts.length > 0) {
-      setSubAccounts(prev => [...prev, ...createdSubAccounts]);
-    }
     if (createdProjects.length > 0) {
       setProjects(prev => [...prev, ...createdProjects]);
     }
@@ -1713,30 +1710,39 @@ export default function TransactionsView({
       };
     });
 
-    setSubAccounts(prev => prev.map(acc => {
-      let balanceChange = 0;
-      newTransactions.forEach(tx => {
-        if (tx.accountId === acc.id) {
-          balanceChange += getImpact(tx.type, tx.amount, true);
-        }
-        if (tx.type === 'transfer' && tx.toAccountId === acc.id) {
-          const toAmt = tx.toAmount !== undefined ? tx.toAmount : tx.amount;
-          balanceChange += toAmt;
+    setSubAccounts(prev => {
+      const combined = [...prev];
+      createdSubAccounts.forEach(newAcc => {
+        if (!combined.some(s => s.id === newAcc.id)) {
+          combined.push(newAcc);
         }
       });
-      let resolvedCurrency = acc.currency;
-      if (resolvedCurrency === '₸') {
-        const detected = detectCurrencyFromName(acc.name);
-        if (detected !== '₸') {
-          resolvedCurrency = detected;
+
+      return combined.map(acc => {
+        let balanceChange = 0;
+        newTransactions.forEach(tx => {
+          if (tx.accountId === acc.id) {
+            balanceChange += getImpact(tx.type, tx.amount, true);
+          }
+          if (tx.type === 'transfer' && tx.toAccountId === acc.id) {
+            const toAmt = tx.toAmount !== undefined ? tx.toAmount : tx.amount;
+            balanceChange += toAmt;
+          }
+        });
+        let resolvedCurrency = acc.currency;
+        if (resolvedCurrency === '₸') {
+          const detected = detectCurrencyFromName(acc.name);
+          if (detected !== '₸') {
+            resolvedCurrency = detected;
+          }
         }
-      }
-      return { 
-        ...acc, 
-        balance: acc.balance + balanceChange,
-        currency: resolvedCurrency
-      };
-    }));
+        return { 
+          ...acc, 
+          balance: acc.balance + balanceChange,
+          currency: resolvedCurrency
+        };
+      });
+    });
 
     setTransactions(prev => [...newTransactions, ...prev]);
 
