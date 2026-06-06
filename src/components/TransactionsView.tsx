@@ -1068,6 +1068,33 @@ export default function TransactionsView({
     return '₸';
   };
 
+  const getTxCurrency = (tx: Transaction, isSource = true): string => {
+    const targetId = isSource ? tx.accountId : tx.toAccountId;
+    const targetName = isSource ? tx.accountName : tx.toAccountName;
+    const targetOriginalName = isSource ? tx.accountOriginalName : tx.toAccountOriginalName;
+
+    if (!targetId) return '₸';
+
+    const sub = subAccounts.find(s => s.id === targetId);
+    if (sub) {
+      if (sub.currency === '₸') {
+        const detected = detectCurrencyFromName(sub.name);
+        if (detected !== '₸') return detected;
+      }
+      return sub.currency || '₸';
+    }
+
+    if (targetName) {
+      const detected = detectCurrencyFromName(targetName);
+      if (detected !== '₸') return detected;
+    }
+    if (targetOriginalName) {
+      const detected = detectCurrencyFromName(targetOriginalName);
+      if (detected !== '₸') return detected;
+    }
+    return '₸';
+  };
+
   const handleMappingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -1694,7 +1721,18 @@ export default function TransactionsView({
           balanceChange += toAmt;
         }
       });
-      return { ...acc, balance: acc.balance + balanceChange };
+      let resolvedCurrency = acc.currency;
+      if (resolvedCurrency === '₸') {
+        const detected = detectCurrencyFromName(acc.name);
+        if (detected !== '₸') {
+          resolvedCurrency = detected;
+        }
+      }
+      return { 
+        ...acc, 
+        balance: acc.balance + balanceChange,
+        currency: resolvedCurrency
+      };
     }));
 
     setTransactions(prev => [...newTransactions, ...prev]);
@@ -2150,13 +2188,13 @@ export default function TransactionsView({
                       <td className={`p-3.5 text-right font-mono font-bold whitespace-nowrap text-xs text-zinc-900`}>
                         {tx.type === 'transfer' ? (
                           <div className="flex flex-col items-end gap-0.5">
-                            <span className="text-zinc-800 font-bold">-{formatCurrency(Math.abs(tx.amount), subAccounts.find(s => s.id === tx.accountId)?.currency || '₸')}</span>
-                            <span className="text-zinc-400 font-bold text-[11px]">+{formatCurrency(Math.abs(tx.toAmount || tx.amount), subAccounts.find(s => s.id === tx.toAccountId)?.currency || '₸')}</span>
+                            <span className="text-zinc-800 font-bold">-{formatCurrency(Math.abs(tx.amount), getTxCurrency(tx, true))}</span>
+                            <span className="text-zinc-400 font-bold text-[11px]">+{formatCurrency(Math.abs(tx.toAmount || tx.amount), getTxCurrency(tx, false))}</span>
                           </div>
                         ) : (
                           <>
                             {tx.type === 'expense' ? '-' : ''}
-                            {formatCurrency(tx.amount, subAccounts.find(s => s.id === tx.accountId)?.currency || '₸')}
+                            {formatCurrency(tx.amount, getTxCurrency(tx, true))}
                           </>
                         )}
                       </td>
@@ -2202,7 +2240,7 @@ export default function TransactionsView({
                             </span>
                           </td>
                           <td className={`p-3.5 text-right font-mono font-medium whitespace-nowrap text-xs text-zinc-600`}>
-                            {tx.type === 'expense' ? '-' : ''}{formatCurrency(s.amount, subAccounts.find(sa => sa.id === tx.accountId)?.currency || '₸')}
+                            {tx.type === 'expense' ? '-' : ''}{formatCurrency(s.amount, getTxCurrency(tx, true))}
                           </td>
                           <td className="p-3.5 border-r border-zinc-300"></td>
                         </tr>

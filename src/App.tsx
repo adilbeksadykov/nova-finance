@@ -187,6 +187,38 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // One-time fix for existing sub-accounts currency detection
+  useEffect(() => {
+    if (!isDataLoaded || subAccounts.length === 0) return;
+    
+    const detectCurrencyFromName = (name: string): string => {
+      const upper = name.toUpperCase();
+      if (upper.includes('USD') || upper.includes('$')) return '$';
+      if (upper.includes('EUR') || upper.includes('€')) return '€';
+      if (upper.includes('RUB') || upper.includes('₽') || upper.includes('RUR')) return '₽';
+      if (upper.includes('GBP') || upper.includes('£')) return '£';
+      if (upper.includes('CNY') || upper.includes('¥')) return '¥';
+      if (upper.includes('KZT') || upper.includes('₸') || upper.includes('ТЕНГЕ')) return '₸';
+      return '₸';
+    };
+
+    let changed = false;
+    const updatedSubAccounts = subAccounts.map(sub => {
+      if (sub.currency === '₸' || !sub.currency) {
+        const detected = detectCurrencyFromName(sub.name);
+        if (detected !== sub.currency) {
+          changed = true;
+          return { ...sub, currency: detected };
+        }
+      }
+      return sub;
+    });
+
+    if (changed) {
+      setSubAccounts(updatedSubAccounts);
+    }
+  }, [isDataLoaded]);
+
   // Auto-save data changes to Firestore
   useEffect(() => {
     if (!currentUser || !isDataLoaded) return;
