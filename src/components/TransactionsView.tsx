@@ -1173,14 +1173,18 @@ export default function TransactionsView({
         }
       } else {
         const typeStr = String(rawType).trim().toLowerCase();
-        if (typeStr === typeIncomeValue.toLowerCase()) {
-          txType = 'income';
-        } else if (typeStr === typeTransferValue.toLowerCase()) {
-          txType = 'transfer';
-        } else if (typeStr === typeAccrualValue.toLowerCase()) {
-          txType = 'accrual';
-        } else if (typeStr === typeExpenseValue.toLowerCase()) {
-          txType = 'expense';
+        if (columnMapping.type && typeStr) {
+          if (typeIncomeValue && typeStr === typeIncomeValue.toLowerCase()) {
+            txType = 'income';
+          } else if (typeTransferValue && typeStr === typeTransferValue.toLowerCase()) {
+            txType = 'transfer';
+          } else if (typeAccrualValue && typeStr === typeAccrualValue.toLowerCase()) {
+            txType = 'accrual';
+          } else if (typeExpenseValue && typeStr === typeExpenseValue.toLowerCase()) {
+            txType = 'expense';
+          } else {
+            txType = 'expense';
+          }
         } else {
           txType = 'expense';
         }
@@ -1253,7 +1257,7 @@ export default function TransactionsView({
       const rawToAmount = columnMapping.toAmount ? row[columnMapping.toAmount] : '';
       const toAccountName = String(rawToAccount).trim();
 
-      if (txType === 'transfer' && toAccountName) {
+      if (txType === 'transfer' && toAccountName && toAccountName !== accountName) {
         const toAccountExists = subAccounts.some(s => s.name.toLowerCase() === toAccountName.toLowerCase() || s.id === toAccountName);
         if (!toAccountExists) {
           newSubAccountsSet.add(toAccountName);
@@ -1264,7 +1268,7 @@ export default function TransactionsView({
       if (rawToAmount) {
         const parsedToAmt = typeof rawToAmount === 'number' ? rawToAmount : parseFloat(String(rawToAmount).replace(/\s/g, '').replace(/,/g, '.'));
         if (!isNaN(parsedToAmt)) {
-          toAmt = parsedToAmt;
+          toAmt = Math.abs(parsedToAmt);
         }
       }
 
@@ -1286,7 +1290,7 @@ export default function TransactionsView({
 
       // Check if we need to pair this transfer row (two-row transfer representation)
       let paired = false;
-      if (txType === 'transfer' && !toAccountName) {
+      if (txType === 'transfer' && (!toAccountName || toAccountName === accountName)) {
         // Find all matching unpaired transfers
         const candidates = parsedTxs
           .map((ptx, pIdx) => ({ ptx, pIdx }))
@@ -1358,7 +1362,7 @@ export default function TransactionsView({
         legalEntity: String(rawLegalEntity).trim(),
         _originalAmountWasZero: originalAmount === 0,
         _originalRawAmount: originalAmount,
-        _isUnpairedTransfer: txType === 'transfer' && !toAccountName,
+        _isUnpairedTransfer: txType === 'transfer' && (!toAccountName || toAccountName === accountName),
         splits: []
       });
     });
@@ -1499,10 +1503,16 @@ export default function TransactionsView({
 
       if (tx.type === 'transfer') {
         const lowerToAcc = tx.toAccountOriginalName?.toLowerCase() || '';
-        toAccountId = accountMapping[lowerToAcc] || subAccounts[1]?.id || subAccounts[0]?.id || '2';
+        const lowerAcc = tx.accountOriginalName?.toLowerCase() || '';
+        const hasMappedToAcc = lowerToAcc && lowerToAcc !== lowerAcc;
+        
+        toAccountId = hasMappedToAcc
+          ? (accountMapping[lowerToAcc] || subAccounts[1]?.id || subAccounts[0]?.id || '2')
+          : (subAccounts.find(s => s.id !== mappedAccId)?.id || subAccounts[1]?.id || subAccounts[0]?.id || '2');
+
         const toAcc = createdSubAccounts.find(s => s.id === toAccountId) || subAccounts.find(s => s.id === toAccountId);
         toAccountName = toAcc ? toAcc.name : tx.toAccountOriginalName;
-        toAmount = tx.toAmount || tx.amount;
+        toAmount = Math.abs(tx.toAmount || tx.amount);
         toDate = tx.date;
       }
 
@@ -2020,8 +2030,8 @@ export default function TransactionsView({
                       <td className={`p-3.5 text-right font-mono font-bold whitespace-nowrap text-xs text-zinc-900`}>
                         {tx.type === 'transfer' ? (
                           <div className="flex flex-col items-end gap-0.5">
-                            <span className="text-zinc-800 font-bold">-{formatCurrency(tx.amount, '₸')}</span>
-                            <span className="text-zinc-400 font-bold text-[11px]">+{formatCurrency(tx.toAmount || tx.amount, '₸')}</span>
+                            <span className="text-zinc-800 font-bold">-{formatCurrency(Math.abs(tx.amount), '₸')}</span>
+                            <span className="text-zinc-400 font-bold text-[11px]">+{formatCurrency(Math.abs(tx.toAmount || tx.amount), '₸')}</span>
                           </div>
                         ) : (
                           <>
