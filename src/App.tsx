@@ -236,11 +236,11 @@ export default function App() {
   // Dynamic Balance Math
   const netCorporateBalance = useMemo(() => {
     return subAccounts.reduce((sum, sub) => {
-      // Simple rate check if USD ($ is indexed at id 9)
-      const multiplier = sub.currency === '$' ? 452.40 : 1;
+      const rateObj = exchangeRates.find(r => r.symbol === sub.currency);
+      const multiplier = rateObj ? rateObj.rate : 1;
       return sum + (sub.balance * multiplier);
     }, 0);
-  }, [subAccounts]);
+  }, [subAccounts, exchangeRates]);
 
   const renderActiveTab = () => {
     switch (currentTab) {
@@ -301,6 +301,7 @@ export default function App() {
             projects={projects}
             setProjects={setProjects}
             legalEntities={legalEntities}
+            setLegalEntities={setLegalEntities}
             accountTypes={accountTypes}
           />
         );

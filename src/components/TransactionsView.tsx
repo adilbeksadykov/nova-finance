@@ -164,6 +164,12 @@ function parse1CClientBank(text: string): {
   };
 }
 
+interface DetectedNewSubAccount {
+  name: string;
+  currency: string;
+  parentEntity: string;
+}
+
 interface TransactionsViewProps {
   transactions: Transaction[];
   setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
@@ -174,6 +180,7 @@ interface TransactionsViewProps {
   projects: Project[];
   setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
   legalEntities: LegalEntity[];
+  setLegalEntities: React.Dispatch<React.SetStateAction<LegalEntity[]>>;
   accountTypes: string[];
 }
 
@@ -187,6 +194,7 @@ export default function TransactionsView({
   projects,
   setProjects,
   legalEntities,
+  setLegalEntities,
   accountTypes
 }: TransactionsViewProps) {
   // Search and Filter states
@@ -248,7 +256,8 @@ export default function TransactionsView({
   // Detected metadata
   const [detectedNewCategories, setDetectedNewCategories] = useState<{ name: string; inferredType: string; isChild: boolean; parentName?: string; level?: number }[]>([]);
   const [detectedNewProjects, setDetectedNewProjects] = useState<string[]>([]);
-  const [detectedNewSubAccounts, setDetectedNewSubAccounts] = useState<string[]>([]);
+  const [detectedNewSubAccounts, setDetectedNewSubAccounts] = useState<DetectedNewSubAccount[]>([]);
+  const [detectedNewLegalEntities, setDetectedNewLegalEntities] = useState<string[]>([]);
   const [parsedMigrationTxs, setParsedMigrationTxs] = useState<any[]>([]);
 
   // Quick Create Modal states
@@ -1048,12 +1057,24 @@ export default function TransactionsView({
     }
   };
 
+  const detectCurrencyFromName = (name: string): string => {
+    const upper = name.toUpperCase();
+    if (upper.includes('USD') || upper.includes('$')) return '$';
+    if (upper.includes('EUR') || upper.includes('€')) return '€';
+    if (upper.includes('RUB') || upper.includes('₽') || upper.includes('RUR')) return '₽';
+    if (upper.includes('GBP') || upper.includes('£')) return '£';
+    if (upper.includes('CNY') || upper.includes('¥')) return '¥';
+    if (upper.includes('KZT') || upper.includes('₸') || upper.includes('ТЕНГЕ')) return '₸';
+    return '₸';
+  };
+
   const handleMappingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
     const newCategoriesMap: Record<string, { name: string; inferredType: string; isChild: boolean; parentName?: string }> = {};
     const newProjectsSet = new Set<string>();
-    const newSubAccountsSet = new Set<string>();
+    const newSubAccountsMap: Record<string, DetectedNewSubAccount> = {};
+    const newLegalEntitiesSet = new Set<string>();
     const parsedTxs: any[] = [];
 
     rawRows.forEach((row, idx) => {
@@ -1241,11 +1262,42 @@ export default function TransactionsView({
         }
       }
 
+      // Legal Entity Discovery
+      const rawLegalEntity = columnMapping.legalEntity ? row[columnMapping.legalEntity] : '';
       const accountName = String(rawAccount).trim();
+      let rowLegalEntityName = String(rawLegalEntity).trim();
+
+      // Heuristic: try to parse legal entity from accountName if not present in column
+      if (!rowLegalEntityName && accountName) {
+        const match = accountName.match(/\[(.*?)\]/);
+        if (match) {
+          rowLegalEntityName = match[1].trim();
+        }
+      }
+
+      if (rowLegalEntityName) {
+        const exists = legalEntities.some(le => 
+          le.code.toLowerCase() === rowLegalEntityName.toLowerCase() || 
+          le.label.toLowerCase() === rowLegalEntityName.toLowerCase()
+        );
+        if (!exists) {
+          newLegalEntitiesSet.add(rowLegalEntityName);
+        }
+      }
+
       if (accountName) {
         const accountExists = subAccounts.some(s => s.name.toLowerCase() === accountName.toLowerCase() || s.id === accountName);
         if (!accountExists) {
-          newSubAccountsSet.add(accountName);
+          const lowerName = accountName.toLowerCase();
+          if (!newSubAccountsMap[lowerName]) {
+            newSubAccountsMap[lowerName] = {
+              name: accountName,
+              currency: detectCurrencyFromName(accountName),
+              parentEntity: rowLegalEntityName || (legalEntities[0]?.code || 'NOVA')
+            };
+          } else if (rowLegalEntityName) {
+            newSubAccountsMap[lowerName].parentEntity = rowLegalEntityName;
+          }
         }
       }
 
@@ -1256,8 +1308,33 @@ export default function TransactionsView({
 
       if (txType === 'transfer' && toAccountName && toAccountName !== accountName) {
         const toAccountExists = subAccounts.some(s => s.name.toLowerCase() === toAccountName.toLowerCase() || s.id === toAccountName);
+        let toLeName = rowLegalEntityName;
+        const match = toAccountName.match(/\[(.*?)\]/);
+        if (match) {
+          toLeName = match[1].trim();
+        }
+
+        if (toLeName) {
+          const exists = legalEntities.some(le => 
+            le.code.toLowerCase() === toLeName.toLowerCase() || 
+            le.label.toLowerCase() === toLeName.toLowerCase()
+          );
+          if (!exists) {
+            newLegalEntitiesSet.add(toLeName);
+          }
+        }
+
         if (!toAccountExists) {
-          newSubAccountsSet.add(toAccountName);
+          const lowerName = toAccountName.toLowerCase();
+          if (!newSubAccountsMap[lowerName]) {
+            newSubAccountsMap[lowerName] = {
+              name: toAccountName,
+              currency: detectCurrencyFromName(toAccountName),
+              parentEntity: toLeName || (legalEntities[0]?.code || 'NOVA')
+            };
+          } else if (toLeName) {
+            newSubAccountsMap[lowerName].parentEntity = toLeName;
+          }
         }
       }
 
@@ -1271,7 +1348,6 @@ export default function TransactionsView({
 
       // Accrual specific columns
       const rawCreditArticle = columnMapping.creditArticle ? row[columnMapping.creditArticle] : '';
-      const rawLegalEntity = columnMapping.legalEntity ? row[columnMapping.legalEntity] : '';
       const creditCategoryName = String(rawCreditArticle).trim();
 
       if (txType === 'accrual' && creditCategoryName) {
@@ -1356,7 +1432,7 @@ export default function TransactionsView({
         project: projectName || 'Без проекта',
         notes: String(rawNotes).trim(),
         creditArticle: creditCategoryName,
-        legalEntity: String(rawLegalEntity).trim(),
+        legalEntity: rowLegalEntityName || String(rawLegalEntity).trim(),
         _originalAmountWasZero: originalAmount === 0,
         _originalRawAmount: originalAmount,
         _isUnpairedTransfer: txType === 'transfer' && (!toAccountName || toAccountName === accountName),
@@ -1366,28 +1442,70 @@ export default function TransactionsView({
 
     setDetectedNewCategories(Object.values(newCategoriesMap));
     setDetectedNewProjects(Array.from(newProjectsSet));
-    setDetectedNewSubAccounts(Array.from(newSubAccountsSet));
+    setDetectedNewSubAccounts(Object.values(newSubAccountsMap));
+    setDetectedNewLegalEntities(Array.from(newLegalEntitiesSet));
     setParsedMigrationTxs(parsedTxs);
     setImportPhase('preview');
   };
 
   const handleConfirmExcelImport = () => {
+    const createdLegalEntities: LegalEntity[] = [];
+    const legalEntityMapping: Record<string, string> = {}; // maps name to code
+
+    detectedNewLegalEntities.forEach((leName) => {
+      const newId = `le-${Date.now()}-${Math.random()}`;
+      const newCode = leName;
+      const newLE: LegalEntity = {
+        id: newId,
+        code: newCode,
+        label: leName,
+        inn: String(Math.floor(100000000000 + Math.random() * 900000000000))
+      };
+      createdLegalEntities.push(newLE);
+      legalEntityMapping[leName.toLowerCase()] = newCode;
+    });
+
+    if (createdLegalEntities.length > 0) {
+      setLegalEntities(prev => [...prev, ...createdLegalEntities]);
+    }
+
     const createdSubAccounts: SubAccount[] = [];
     const accountMapping: Record<string, string> = {};
 
-    detectedNewSubAccounts.forEach((accName) => {
+    detectedNewSubAccounts.forEach((acc) => {
       const newId = `acc-${Date.now()}-${Math.random()}`;
+      
+      // Resolve parentEntity code
+      const detectedLeName = acc.parentEntity;
+      let parentEntityCode = 'NOVA';
+      if (detectedLeName) {
+        const existingLE = legalEntities.find(le => 
+          le.code.toLowerCase() === detectedLeName.toLowerCase() || 
+          le.label.toLowerCase() === detectedLeName.toLowerCase()
+        );
+        if (existingLE) {
+          parentEntityCode = existingLE.code;
+        } else {
+          const newLE = createdLegalEntities.find(le => le.label.toLowerCase() === detectedLeName.toLowerCase());
+          if (newLE) {
+            parentEntityCode = newLE.code;
+          }
+        }
+      } else if (legalEntities.length > 0) {
+        parentEntityCode = legalEntities[0].code;
+      }
+
       const newAcc: SubAccount = {
         id: newId,
-        name: accName,
-        parentEntity: legalEntities[0]?.code || 'NOVA',
+        name: acc.name,
+        parentEntity: parentEntityCode,
         type: 'non-cash',
         balance: 0,
         initialBalance: 0,
-        currency: '₸'
+        currency: acc.currency
       };
       createdSubAccounts.push(newAcc);
-      accountMapping[accName.toLowerCase()] = newId;
+      accountMapping[acc.name.toLowerCase()] = newId;
     });
 
     subAccounts.forEach(sa => {
@@ -1700,6 +1818,12 @@ export default function TransactionsView({
     
     alert(`Успешно импортировано операций: ${newTxs.length}. Создано новых счетов: ${createdAccounts.length}.`);
   };
+
+  const fromAcc = subAccounts.find(s => s.id === formAccountId);
+  const fromCurrency = fromAcc ? fromAcc.currency : '₸';
+
+  const toAcc = subAccounts.find(s => s.id === formToAccountId);
+  const toCurrency = toAcc ? toAcc.currency : '₸';
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
@@ -2026,13 +2150,13 @@ export default function TransactionsView({
                       <td className={`p-3.5 text-right font-mono font-bold whitespace-nowrap text-xs text-zinc-900`}>
                         {tx.type === 'transfer' ? (
                           <div className="flex flex-col items-end gap-0.5">
-                            <span className="text-zinc-800 font-bold">-{formatCurrency(Math.abs(tx.amount), '₸')}</span>
-                            <span className="text-zinc-400 font-bold text-[11px]">+{formatCurrency(Math.abs(tx.toAmount || tx.amount), '₸')}</span>
+                            <span className="text-zinc-800 font-bold">-{formatCurrency(Math.abs(tx.amount), subAccounts.find(s => s.id === tx.accountId)?.currency || '₸')}</span>
+                            <span className="text-zinc-400 font-bold text-[11px]">+{formatCurrency(Math.abs(tx.toAmount || tx.amount), subAccounts.find(s => s.id === tx.toAccountId)?.currency || '₸')}</span>
                           </div>
                         ) : (
                           <>
                             {tx.type === 'expense' ? '-' : ''}
-                            {formatCurrency(tx.amount, '₸')}
+                            {formatCurrency(tx.amount, subAccounts.find(s => s.id === tx.accountId)?.currency || '₸')}
                           </>
                         )}
                       </td>
@@ -2078,7 +2202,7 @@ export default function TransactionsView({
                             </span>
                           </td>
                           <td className={`p-3.5 text-right font-mono font-medium whitespace-nowrap text-xs text-zinc-600`}>
-                            {tx.type === 'expense' ? '-' : ''}{formatCurrency(s.amount, '₸')}
+                            {tx.type === 'expense' ? '-' : ''}{formatCurrency(s.amount, subAccounts.find(sa => sa.id === tx.accountId)?.currency || '₸')}
                           </td>
                           <td className="p-3.5 border-r border-zinc-300"></td>
                         </tr>
@@ -2209,7 +2333,7 @@ export default function TransactionsView({
                           <optgroup key={entityName} label={entityName}>
                             {entityAccounts.map(sub => (
                               <option key={sub.id} value={sub.id}>
-                                {sub.name} ({sub.balance >= 0 ? '+' : ''}{formatCurrency(sub.balance, '')})
+                                {sub.name} ({sub.balance >= 0 ? '+' : ''}{formatCurrency(sub.balance, sub.currency)})
                               </option>
                             ))}
                           </optgroup>
@@ -2219,7 +2343,7 @@ export default function TransactionsView({
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Сумма в KZT (₸)</label>
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Сумма ({fromCurrency})</label>
                       <div className="relative">
                         <input
                           type="text"
@@ -2229,7 +2353,7 @@ export default function TransactionsView({
                           required
                           className="w-full text-xs border border-zinc-200 rounded-none p-2.5 pl-3 pr-10 text-zinc-800 bg-zinc-50 font-mono font-bold focus:outline-none focus:bg-white focus:border-zinc-800"
                         />
-                        <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">₸</span>
+                        <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">{fromCurrency}</span>
                       </div>
                     </div>
                   </div>
@@ -2452,7 +2576,7 @@ export default function TransactionsView({
                             <optgroup key={entityName} label={entityName}>
                               {entityAccounts.map(sub => (
                                 <option key={sub.id} value={sub.id}>
-                                  {sub.name} ({formatCurrency(sub.balance, '')})
+                                  {sub.name} ({formatCurrency(sub.balance, sub.currency)})
                                 </option>
                               ))}
                             </optgroup>
@@ -2461,7 +2585,7 @@ export default function TransactionsView({
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Сумма списания</label>
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Сумма списания ({fromCurrency})</label>
                         <div className="relative">
                           <input
                             type="text"
@@ -2475,7 +2599,7 @@ export default function TransactionsView({
                             required
                             className="w-full text-xs border border-zinc-200 rounded-none p-2.5 pl-3 pr-10 text-zinc-800 bg-white font-mono font-bold focus:outline-none focus:border-zinc-800"
                           />
-                          <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">₸</span>
+                          <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">{fromCurrency}</span>
                         </div>
                       </div>
                     </div>
@@ -2528,7 +2652,7 @@ export default function TransactionsView({
                             <optgroup key={entityName} label={entityName}>
                               {entityAccounts.map(sub => (
                                 <option key={sub.id} value={sub.id}>
-                                  {sub.name} ({formatCurrency(sub.balance, '')})
+                                  {sub.name} ({formatCurrency(sub.balance, sub.currency)})
                                 </option>
                               ))}
                             </optgroup>
@@ -2537,7 +2661,7 @@ export default function TransactionsView({
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Сумма зачисления</label>
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Сумма зачисления ({toCurrency})</label>
                         <div className="relative">
                           <input
                             type="text"
@@ -2547,7 +2671,7 @@ export default function TransactionsView({
                             required
                             className="w-full text-xs border border-zinc-200 rounded-none p-2.5 pl-3 pr-10 text-zinc-800 bg-white font-mono font-bold focus:outline-none focus:border-zinc-800"
                           />
-                          <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">₸</span>
+                          <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">{toCurrency}</span>
                         </div>
                       </div>
                     </div>
@@ -2829,7 +2953,7 @@ export default function TransactionsView({
                           <optgroup key={entityName} label={entityName}>
                             {entityAccounts.map(sub => (
                               <option key={sub.id} value={sub.id}>
-                                {sub.name} ({sub.balance >= 0 ? '+' : ''}{formatCurrency(sub.balance, '')})
+                                {sub.name} ({sub.balance >= 0 ? '+' : ''}{formatCurrency(sub.balance, sub.currency)})
                               </option>
                             ))}
                           </optgroup>
@@ -2839,13 +2963,16 @@ export default function TransactionsView({
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Сумма валюты (₸)</label>
-                      <input
-                        type="text"
-                        value={formAmount}
-                        onChange={(e) => setFormAmount(e.target.value.replace(/\D/g, ''))}
-                        className="w-full text-xs border border-zinc-200 rounded-none p-2.5 text-zinc-800 bg-zinc-50 font-mono font-bold focus:outline-none focus:bg-white focus:border-zinc-800"
-                      />
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase block tracking-wider">Сумма ({fromCurrency})</label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={formAmount}
+                          onChange={(e) => setFormAmount(e.target.value.replace(/\D/g, ''))}
+                          className="w-full text-xs border border-zinc-200 rounded-none p-2.5 pr-10 text-zinc-800 bg-zinc-50 font-mono font-bold focus:outline-none focus:bg-white focus:border-zinc-800"
+                        />
+                        <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">{fromCurrency}</span>
+                      </div>
                     </div>
                   </div>
 
@@ -3066,7 +3193,7 @@ export default function TransactionsView({
                             <optgroup key={entityName} label={entityName}>
                               {entityAccounts.map(sub => (
                                 <option key={sub.id} value={sub.id}>
-                                  {sub.name} ({formatCurrency(sub.balance, '')})
+                                  {sub.name} ({formatCurrency(sub.balance, sub.currency)})
                                 </option>
                               ))}
                             </optgroup>
@@ -3075,7 +3202,7 @@ export default function TransactionsView({
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Сумма списания</label>
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Сумма списания ({fromCurrency})</label>
                         <div className="relative">
                           <input
                             type="text"
@@ -3089,7 +3216,7 @@ export default function TransactionsView({
                             required
                             className="w-full text-xs border border-zinc-200 rounded-none p-2.5 pl-3 pr-10 text-zinc-800 bg-white font-mono font-bold focus:outline-none focus:border-zinc-800"
                           />
-                          <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">₸</span>
+                          <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">{fromCurrency}</span>
                         </div>
                       </div>
                     </div>
@@ -3142,7 +3269,7 @@ export default function TransactionsView({
                             <optgroup key={entityName} label={entityName}>
                               {entityAccounts.map(sub => (
                                 <option key={sub.id} value={sub.id}>
-                                  {sub.name} ({formatCurrency(sub.balance, '')})
+                                  {sub.name} ({formatCurrency(sub.balance, sub.currency)})
                                 </option>
                               ))}
                             </optgroup>
@@ -3151,7 +3278,7 @@ export default function TransactionsView({
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Сумма зачисления</label>
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase block tracking-wider">Сумма зачисления ({toCurrency})</label>
                         <div className="relative">
                           <input
                             type="text"
@@ -3161,7 +3288,7 @@ export default function TransactionsView({
                             required
                             className="w-full text-xs border border-zinc-200 rounded-none p-2.5 pl-3 pr-10 text-zinc-800 bg-white font-mono font-bold focus:outline-none focus:border-zinc-800"
                           />
-                          <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">₸</span>
+                          <span className="absolute right-3.5 top-2.5 text-xs text-zinc-400 font-bold font-mono">{toCurrency}</span>
                         </div>
                       </div>
                     </div>
@@ -3408,7 +3535,7 @@ export default function TransactionsView({
                         <optgroup key={entityName} label={entityName}>
                           {entityAccounts.map(sub => (
                             <option key={sub.id} value={sub.id}>
-                              {sub.name} ({formatCurrency(sub.balance, '')})
+                              {sub.name} ({formatCurrency(sub.balance, sub.currency)})
                             </option>
                           ))}
                         </optgroup>
@@ -4221,6 +4348,23 @@ export default function TransactionsView({
 
                 {importType === 'excel_migration' && (
                   <div className="space-y-4">
+                    {/* Detected legal entities */}
+                    {detectedNewLegalEntities.length > 0 && (
+                      <div className="p-4 bg-zinc-50 border border-zinc-200 rounded-none">
+                        <div className="flex items-center gap-1.5 border-b border-zinc-200 pb-1.5 mb-2">
+                          <AlertCircle size={14} className="text-amber-500" />
+                          <span className="font-bold text-[10px] uppercase tracking-wider text-zinc-700">Будут созданы новые организации ({detectedNewLegalEntities.length}):</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                          {detectedNewLegalEntities.map(le => (
+                            <span key={le} className="text-[10px] bg-zinc-200 text-zinc-800 px-2 py-0.5 font-mono border border-zinc-300">
+                              {le}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Detected subaccounts */}
                     {detectedNewSubAccounts.length > 0 && (
                       <div className="p-4 bg-zinc-50 border border-zinc-200 rounded-none">
@@ -4230,8 +4374,10 @@ export default function TransactionsView({
                         </div>
                         <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
                           {detectedNewSubAccounts.map(acc => (
-                            <span key={acc} className="text-[10px] bg-zinc-200 text-zinc-800 px-2 py-0.5 font-mono border border-zinc-300">
-                              {acc}
+                            <span key={acc.name} className="text-[10px] bg-zinc-200 text-zinc-800 px-2 py-0.5 font-mono border border-zinc-300 flex items-center gap-1.5">
+                              <span>{acc.name}</span>
+                              <span className="text-[9px] bg-zinc-900 text-white px-1.5 py-0.2 rounded-none font-sans font-bold">{acc.currency}</span>
+                              <span className="text-[9px] text-zinc-500 font-sans">({acc.parentEntity})</span>
                             </span>
                           ))}
                         </div>
@@ -4297,6 +4443,9 @@ export default function TransactionsView({
                           <tbody className="divide-y divide-zinc-200 text-[11px] text-zinc-650 bg-white">
                             {parsedMigrationTxs.slice(0, 50).map((tx, idx) => {
                               const isInc = tx.type === 'income';
+                              const matchingAcc = subAccounts.find(s => s.name.toLowerCase() === tx.accountOriginalName.toLowerCase()) || 
+                                                  detectedNewSubAccounts.find(s => s.name.toLowerCase() === tx.accountOriginalName.toLowerCase());
+                              const curSymbol = matchingAcc ? matchingAcc.currency : '₸';
                               return (
                                 <tr key={idx} className="hover:bg-zinc-50/50">
                                   <td className="p-2 font-mono whitespace-nowrap">{tx.date}</td>
@@ -4313,7 +4462,7 @@ export default function TransactionsView({
                                   <td className="p-2 font-mono text-[10px]">{tx.project}</td>
                                   <td className="p-2 truncate max-w-[180px]" title={tx.notes}>{tx.notes}</td>
                                   <td className={`p-2 text-right font-mono font-bold whitespace-nowrap ${isInc ? 'text-emerald-600' : 'text-red-600'}`}>
-                                    {isInc ? '+' : '-'}{formatCurrency(tx.amount, '₸')}
+                                    {isInc ? '+' : '-'}{formatCurrency(tx.amount, curSymbol)}
                                   </td>
                                 </tr>
                               );
