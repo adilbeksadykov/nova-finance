@@ -14,8 +14,8 @@ import {
   Download
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Transaction, SubAccount, ArticleCategory, Project, LegalEntity, TransactionSplit } from '../types';
-import { formatCurrency } from '../utils';
+import { Transaction, SubAccount, ArticleCategory, Project, LegalEntity, TransactionSplit, ExchangeRate } from '../types';
+import { formatCurrency, getAmountInKzt } from '../utils';
 
 interface Parsed1CTransaction {
   id: string;
@@ -182,6 +182,7 @@ interface TransactionsViewProps {
   legalEntities: LegalEntity[];
   setLegalEntities: React.Dispatch<React.SetStateAction<LegalEntity[]>>;
   accountTypes: string[];
+  exchangeRates: ExchangeRate[];
 }
 
 export default function TransactionsView({ 
@@ -195,7 +196,8 @@ export default function TransactionsView({
   setProjects,
   legalEntities,
   setLegalEntities,
-  accountTypes
+  accountTypes,
+  exchangeRates
 }: TransactionsViewProps) {
   // Search and Filter states
   const [searchTerm, setSearchTerm] = useState('');
@@ -402,14 +404,15 @@ export default function TransactionsView({
            }
         }
 
-        if (tx.type === 'income') income += txAmount;
-        if (tx.type === 'expense' || tx.type === 'accrual') expense += Math.abs(txAmount); 
+        const kztAmount = getAmountInKzt(txAmount, tx.accountId, subAccounts, exchangeRates);
+        if (tx.type === 'income') income += kztAmount;
+        if (tx.type === 'expense' || tx.type === 'accrual') expense += Math.abs(kztAmount); 
       }
     });
 
     const total = income - expense;
     return { count, income, expense, total };
-  }, [selectedTxs, transactions, filterArticles, filterProjects]);
+  }, [selectedTxs, transactions, filterArticles, filterProjects, subAccounts, exchangeRates]);
 
   const activeProjects = useMemo(() => projects.map(p => p.name), [projects]);
   const allArticles = useMemo(() => {
@@ -2263,20 +2266,20 @@ export default function TransactionsView({
           <div>
             <span className="text-zinc-500 mr-2">Все Приходы:</span>
             <span className="font-bold text-white font-mono">
-              {formatCurrency(filteredTxs.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0))}
+              {formatCurrency(filteredTxs.filter(t => t.type === 'income').reduce((sum, t) => sum + getAmountInKzt(t.amount, t.accountId, subAccounts, exchangeRates), 0))}
             </span>
           </div>
           <div>
             <span className="text-zinc-500 mr-2">Все Расходы:</span>
             <span className="font-bold text-zinc-200 font-mono">
-              {formatCurrency(filteredTxs.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0))}
+              {formatCurrency(filteredTxs.filter(t => t.type === 'expense').reduce((sum, t) => sum + getAmountInKzt(t.amount, t.accountId, subAccounts, exchangeRates), 0))}
             </span>
           </div>
           <div className="text-right pr-2">
             <span className="text-zinc-500 mr-2">Итого Сальдо:</span>
             <span className="font-bold text-white font-mono">
               {formatCurrency(
-                filteredTxs.reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount), 0)
+                filteredTxs.reduce((sum, t) => sum + (t.type === 'income' ? getAmountInKzt(t.amount, t.accountId, subAccounts, exchangeRates) : -getAmountInKzt(t.amount, t.accountId, subAccounts, exchangeRates)), 0)
               )}
             </span>
           </div>

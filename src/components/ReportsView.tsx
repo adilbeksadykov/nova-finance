@@ -10,14 +10,16 @@ import {
   TrendingUp,
   LayoutGrid
 } from 'lucide-react';
-import { Transaction } from '../types';
-import { formatCurrency } from '../utils';
+import { Transaction, SubAccount, ExchangeRate } from '../types';
+import { formatCurrency, getAmountInKzt } from '../utils';
 
 interface ReportsViewProps {
   transactions: Transaction[];
+  subAccounts: SubAccount[];
+  exchangeRates: ExchangeRate[];
 }
 
-export default function ReportsView({ transactions }: ReportsViewProps) {
+export default function ReportsView({ transactions, subAccounts, exchangeRates }: ReportsViewProps) {
   const [activeSheet, setActiveSheet] = useState<'dds' | 'opu' | 'balance'>('dds');
   const [currencyCode, setCurrencyCode] = useState('KZT');
   const [expandedRows, setExpandedRows] = useState<string[]>([
@@ -78,12 +80,13 @@ export default function ReportsView({ transactions }: ReportsViewProps) {
       const mIdx = timelineMonths.findIndex(m => m.code === tdate);
 
       if (mIdx !== -1) {
+        const amount = getAmountInKzt(tx.amount, tx.accountId, subAccounts, exchangeRates);
         if (tx.type === 'income') {
-          inflow[mIdx] += tx.amount;
-          opFlow[mIdx] += tx.amount;
+          inflow[mIdx] += amount;
+          opFlow[mIdx] += amount;
         } else if (tx.type === 'expense') {
-          outflow[mIdx] += tx.amount;
-          opFlow[mIdx] -= tx.amount;
+          outflow[mIdx] += amount;
+          opFlow[mIdx] -= amount;
         }
       }
     });
@@ -114,7 +117,7 @@ export default function ReportsView({ transactions }: ReportsViewProps) {
         vals: outflow,
       }
     ];
-  }, [transactions, timelineMonths]);
+  }, [transactions, timelineMonths, subAccounts, exchangeRates]);
 
   // OPU: Profit & Loss datasets
   const opuRows = useMemo(() => {
@@ -130,12 +133,13 @@ export default function ReportsView({ transactions }: ReportsViewProps) {
       const mIdx = timelineMonths.findIndex(m => m.code === tdate);
 
       if (mIdx !== -1) {
+        const amount = getAmountInKzt(tx.amount, tx.accountId, subAccounts, exchangeRates);
         if (tx.type === 'income') {
-          revenue[mIdx] += tx.amount;
-          opProfit[mIdx] += tx.amount;
+          revenue[mIdx] += amount;
+          opProfit[mIdx] += amount;
         } else if (tx.type === 'expense') {
-          costs[mIdx] += tx.amount;
-          opProfit[mIdx] -= tx.amount;
+          costs[mIdx] += amount;
+          opProfit[mIdx] -= amount;
         }
       }
     });
@@ -177,7 +181,7 @@ export default function ReportsView({ transactions }: ReportsViewProps) {
         isPercent: true
       }
     ];
-  }, [transactions, timelineMonths]);
+  }, [transactions, timelineMonths, subAccounts, exchangeRates]);
 
   // BALANCE SHEET datasets
   const balanceRows = useMemo(() => {
@@ -193,10 +197,11 @@ export default function ReportsView({ transactions }: ReportsViewProps) {
     const sortedTxs = [...transactions].filter(t => t.isConfirmed).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     
     sortedTxs.forEach(tx => {
+      const amount = getAmountInKzt(tx.amount, tx.accountId, subAccounts, exchangeRates);
       if (tx.type === 'income') {
-        runningCash += tx.amount;
+        runningCash += amount;
       } else if (tx.type === 'expense') {
-        runningCash -= tx.amount;
+        runningCash -= amount;
       }
     });
 
@@ -256,7 +261,7 @@ export default function ReportsView({ transactions }: ReportsViewProps) {
         vals: capital,
       }
     ];
-  }, [transactions, timelineMonths]);
+  }, [transactions, timelineMonths, subAccounts, exchangeRates]);
 
   const getActiveRows = () => {
     switch (activeSheet) {

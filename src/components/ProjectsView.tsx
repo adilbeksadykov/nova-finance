@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Search, Edit2, Trash2, ChevronDown, ChevronRight, BarChart3, AlertCircle, Calendar, Briefcase, FileText, CheckCircle2, Clock } from 'lucide-react';
-import { Project, Transaction, ProjectGroup } from '../types';
-import { formatCurrency } from '../utils';
+import { Project, Transaction, ProjectGroup, SubAccount, ExchangeRate } from '../types';
+import { formatCurrency, getAmountInKzt } from '../utils';
 import { XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
 
 interface ProjectsViewProps {
@@ -10,9 +10,19 @@ interface ProjectsViewProps {
   projectGroups: ProjectGroup[];
   setProjectGroups: React.Dispatch<React.SetStateAction<ProjectGroup[]>>;
   transactions: Transaction[];
+  subAccounts: SubAccount[];
+  exchangeRates: ExchangeRate[];
 }
 
-export default function ProjectsView({ projects, setProjects, projectGroups, setProjectGroups, transactions }: ProjectsViewProps) {
+export default function ProjectsView({ 
+  projects, 
+  setProjects, 
+  projectGroups, 
+  setProjectGroups, 
+  transactions,
+  subAccounts,
+  exchangeRates
+}: ProjectsViewProps) {
   // Navigation State
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
 
@@ -53,15 +63,17 @@ export default function ProjectsView({ projects, setProjects, projectGroups, set
     transactions.forEach(tx => {
       // Direct
       if (tx.project === projectName) {
-        if (tx.type === 'income') incomes += tx.amount;
-        if (tx.type === 'expense' || tx.type === 'accrual') expenses += Math.abs(tx.amount);
+        const kztAmount = getAmountInKzt(tx.amount, tx.accountId, subAccounts, exchangeRates);
+        if (tx.type === 'income') incomes += kztAmount;
+        if (tx.type === 'expense' || tx.type === 'accrual') expenses += Math.abs(kztAmount);
       }
       // Via splits
       if (tx.splits && tx.splits.length > 0) {
         tx.splits.forEach(s => {
           if (s.project === projectName) {
-             if (tx.type === 'income') incomes += s.amount;
-             if (tx.type === 'expense' || tx.type === 'accrual') expenses += Math.abs(s.amount);
+             const kztSplitAmount = getAmountInKzt(s.amount, tx.accountId, subAccounts, exchangeRates);
+             if (tx.type === 'income') incomes += kztSplitAmount;
+             if (tx.type === 'expense' || tx.type === 'accrual') expenses += Math.abs(kztSplitAmount);
           }
         });
       }
@@ -75,7 +87,7 @@ export default function ProjectsView({ projects, setProjects, projectGroups, set
       stats[p.name] = getProjectStats(p.name);
     });
     return stats;
-  }, [projects, transactions]);
+  }, [projects, transactions, subAccounts, exchangeRates]);
 
   const filteredProjects = useMemo(() => {
     return projects.filter(p => {
@@ -137,9 +149,9 @@ export default function ProjectsView({ projects, setProjects, projectGroups, set
         monthlyData[monthKey] = { name: monthKey, income: 0, expense: 0 };
       }
       
-      let txAmount = tx.amount;
+      let txAmount = getAmountInKzt(tx.amount, tx.accountId, subAccounts, exchangeRates);
       if (tx.splits && tx.splits.length > 0) {
-        txAmount = tx.splits.filter(s => s.project === selectedProject.name).reduce((sum, s) => sum + Number(s.amount), 0);
+        txAmount = tx.splits.filter(s => s.project === selectedProject.name).reduce((sum, s) => sum + getAmountInKzt(Number(s.amount), tx.accountId, subAccounts, exchangeRates), 0);
       }
 
       if (tx.type === 'income') {
@@ -150,7 +162,7 @@ export default function ProjectsView({ projects, setProjects, projectGroups, set
     });
 
     return Object.values(monthlyData);
-  }, [selectedProjTransactions, selectedProject]);
+  }, [selectedProjTransactions, selectedProject, subAccounts, exchangeRates]);
 
   // Handle Operations
   const handleOpenAdd = () => {
@@ -403,10 +415,10 @@ export default function ProjectsView({ projects, setProjects, projectGroups, set
               </thead>
               <tbody className="divide-y divide-zinc-200">
                 {selectedProjTransactions.map(tx => {
-                  let displayAmount = tx.amount;
+                  let displayAmount = getAmountInKzt(tx.amount, tx.accountId, subAccounts, exchangeRates);
                   let isAmountPartial = false;
                   if (tx.splits && tx.splits.length > 0) {
-                     const splitAmount = tx.splits.filter(s => s.project === selectedProject.name).reduce((sum, s) => sum + Number(s.amount), 0);
+                     const splitAmount = tx.splits.filter(s => s.project === selectedProject.name).reduce((sum, s) => sum + getAmountInKzt(Number(s.amount), tx.accountId, subAccounts, exchangeRates), 0);
                      // if it's a split match, show the partial sum
                      if (splitAmount > 0 && tx.project !== selectedProject.name) {
                         displayAmount = splitAmount;
@@ -428,7 +440,7 @@ export default function ProjectsView({ projects, setProjects, projectGroups, set
                       <td className="p-4 text-zinc-600">{tx.splits && tx.splits.length ? <span className="italic text-zinc-400 text-[10px]">(Сплит)</span> : tx.article}</td>
                       <td className={`p-4 text-right font-mono font-medium ${tx.type === 'income' ? 'text-teal-600' : tx.type === 'expense' ? 'text-red-500' : 'text-zinc-600'}`}>
                         {tx.type === 'expense' ? '-' : tx.type === 'income' ? '+' : ''}{formatCurrency(displayAmount)}
-                        {isAmountPartial && <span className="text-[9px] text-zinc-400 block font-sans font-normal leading-tight mt-1">Часть из {formatCurrency(tx.amount)}</span>}
+                        {isAmountPartial && <span className="text-[9px] text-zinc-400 block font-sans font-normal leading-tight mt-1">Часть из {formatCurrency(getAmountInKzt(tx.amount, tx.accountId, subAccounts, exchangeRates))}</span>}
                       </td>
                     </tr>
                   )

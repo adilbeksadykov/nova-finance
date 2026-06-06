@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { ChevronDown, ChevronRight, MoreHorizontal, AlertCircle } from 'lucide-react';
-import { Transaction, SubAccount, ArticleCategory, Project } from '../types';
-import { formatCurrency } from '../utils';
+import { Transaction, SubAccount, ArticleCategory, Project, ExchangeRate } from '../types';
+import { formatCurrency, getAmountInKzt } from '../utils';
 
 interface PlanCalendarViewProps {
   transactions: Transaction[];
@@ -9,6 +9,7 @@ interface PlanCalendarViewProps {
   categories: ArticleCategory[];
   projects: Project[];
   budgets: Record<string, Record<string, Record<string, number>>>;
+  exchangeRates: ExchangeRate[];
 }
 
 const addMonths = (date: Date, months: number) => {
@@ -25,7 +26,7 @@ const formatDisplayMonth = (date: Date) => {
     return `${m.charAt(0).toUpperCase() + m.slice(1)} '${y}`;
 }
 
-export default function PlanCalendarView({ transactions, subAccounts, categories, projects, budgets }: PlanCalendarViewProps) {
+export default function PlanCalendarView({ transactions, subAccounts, categories, projects, budgets, exchangeRates }: PlanCalendarViewProps) {
   const [selectedProject, setSelectedProject] = useState('ALL');
 
   const baseDateStr = '2026-05-01'; // align to month start
@@ -74,7 +75,7 @@ export default function PlanCalendarView({ transactions, subAccounts, categories
                          }
                          if (catId) {
                              const amt = data[monthKey][catId] || 0;
-                             data[monthKey][catId] = amt + Math.abs(split.amount);
+                             data[monthKey][catId] = amt + getAmountInKzt(Math.abs(split.amount), tx.accountId, subAccounts, exchangeRates);
                          }
                      }
                  });
@@ -90,14 +91,14 @@ export default function PlanCalendarView({ transactions, subAccounts, categories
                      }
                      if (catId) {
                          const amt = data[monthKey][catId] || 0;
-                         data[monthKey][catId] = amt + Math.abs(tx.amount);
+                         data[monthKey][catId] = amt + getAmountInKzt(Math.abs(tx.amount), tx.accountId, subAccounts, exchangeRates);
                      }
                  }
              }
          }
       });
       return data;
-  }, [periods, transactions, selectedProject, categories]);
+   }, [periods, transactions, selectedProject, categories, subAccounts, exchangeRates]);
 
   const calculateFactTotal = (nodeId: string, pKey: string): number => {
       if (nodeId === 'op') {

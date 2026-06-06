@@ -7,17 +7,26 @@ import {
   Layers, 
   Filter
 } from 'lucide-react';
-import { Transaction, Project } from '../types';
-import { formatCurrency } from '../utils';
+import { Transaction, Project, SubAccount, ExchangeRate } from '../types';
+import { formatCurrency, getAmountInKzt } from '../utils';
 
 interface DashboardViewProps {
   transactions: Transaction[];
   selectedProject: string;
   setSelectedProject: (proj: string) => void;
   projects: Project[];
+  subAccounts: SubAccount[];
+  exchangeRates: ExchangeRate[];
 }
 
-export default function DashboardView({ transactions, selectedProject, setSelectedProject, projects }: DashboardViewProps) {
+export default function DashboardView({ 
+  transactions, 
+  selectedProject, 
+  setSelectedProject, 
+  projects,
+  subAccounts,
+  exchangeRates
+}: DashboardViewProps) {
   const [calculationMethod, setCalculationMethod] = useState<'accrual' | 'cash'>('accrual');
   const [cashFlowTab, setCashFlowTab] = useState<'all' | 'operating' | 'investment' | 'financial'>('all');
 
@@ -43,7 +52,7 @@ export default function DashboardView({ transactions, selectedProject, setSelect
     filteredTxs.forEach(tx => {
       if (!tx.isConfirmed) return; 
 
-      const amount = tx.amount || 0;
+      const amount = getAmountInKzt(tx.amount, tx.accountId, subAccounts, exchangeRates);
       
       const tdate = new Date(tx.date);
       const mIdx = tdate.getMonth();
@@ -112,7 +121,7 @@ export default function DashboardView({ transactions, selectedProject, setSelect
       expenseComposition,
       topClients
     };
-  }, [filteredTxs]);
+  }, [filteredTxs, subAccounts, exchangeRates]);
 
   const totalIncomes = calculationMethod === 'accrual' ? financialData.incomes : financialData.incomes * 1.04;
   const totalExpenses = calculationMethod === 'accrual' ? financialData.expenses : financialData.expenses * 0.98;

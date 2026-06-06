@@ -293,6 +293,7 @@ export default function App() {
             categories={categories}
             projects={projects}
             budgets={budgets}
+            exchangeRates={exchangeRates}
           />
         );
       case 'projects':
@@ -303,6 +304,8 @@ export default function App() {
             projectGroups={projectGroups}
             setProjectGroups={setProjectGroups}
             transactions={transactions}
+            subAccounts={subAccounts}
+            exchangeRates={exchangeRates}
           />
         );
       case 'legal-entities':
@@ -319,6 +322,8 @@ export default function App() {
             selectedProject={selectedProject}
             setSelectedProject={setSelectedProject}
             projects={projects}
+            subAccounts={subAccounts}
+            exchangeRates={exchangeRates}
           />
         );
       case 'transactions':
@@ -335,6 +340,7 @@ export default function App() {
             legalEntities={legalEntities}
             setLegalEntities={setLegalEntities}
             accountTypes={accountTypes}
+            exchangeRates={exchangeRates}
           />
         );
       case 'account-types':
@@ -357,6 +363,8 @@ export default function App() {
         return (
           <ReportsView 
             transactions={transactions} 
+            subAccounts={subAccounts}
+            exchangeRates={exchangeRates}
           />
         );
       case 'categories':

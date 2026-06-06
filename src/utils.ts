@@ -128,3 +128,13 @@ export const INITIAL_LEGAL_ENTITIES: LegalEntity[] = [
   { id: 'le-6', code: 'IP NOMAD SCHOLARS', label: 'ИП NOMAD SCHOLARS', inn: '960713300114' },
   { id: 'le-7', code: 'IP STAR EDUCATION', label: 'ИП STAR EDUCATION', inn: '970924351148' }
 ];
+
+export function getAmountInKzt(amount: number | undefined, accountId: string, subAccounts: SubAccount[], exchangeRates: ExchangeRate[]): number {
+  const amt = amount || 0;
+  const sub = subAccounts.find(s => s.id === accountId);
+  if (!sub) return amt;
+  const rateObj = exchangeRates.find(r => r.symbol === sub.currency);
+  const multiplier = rateObj ? rateObj.rate : 1;
+  return amt * multiplier;
+}
+
